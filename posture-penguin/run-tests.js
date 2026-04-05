@@ -21,9 +21,9 @@ const projectRoot = path.dirname(__dir);
 
 // 颜色
 const green = (s) => `\x1b[32m${s}\x1b[0m`;
-const red   = (s) => `\x1b[31m${s}\x1b[0m`;
-const cyan  = (s) => `\x1b[36m${s}\x1b[0m`;
-const bold  = (s) => `\x1b[1m${s}\x1b[0m`;
+const red = (s) => `\x1b[31m${s}\x1b[0m`;
+const cyan = (s) => `\x1b[36m${s}\x1b[0m`;
+const bold = (s) => `\x1b[1m${s}\x1b[0m`;
 
 function section(title) {
   console.log(`\n${"=".repeat(60)}`);
@@ -58,7 +58,10 @@ console.log(tscResult.ok ? green("✅ 0 errors") : red(`⚠️ ${tscResult.out}`
 if (mode === "e2e" || mode === "all") {
   section("Step 3 Camera E2E 测试 (Playwright)");
   console.log("$ npx playwright test tests/camera.e2e.test.ts\n");
-  const pwResult = run("npx playwright test tests/camera.e2e.test.ts 2>&1 | head -40", projectRoot);
+  const pwResult = run(
+    "npx playwright test tests/camera.e2e.test.ts 2>&1 | head -40",
+    projectRoot,
+  );
   console.log(pwResult.ok ? green("✅ E2E 通过") : red(pwResult.out));
 }
 

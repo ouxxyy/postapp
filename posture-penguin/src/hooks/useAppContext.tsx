@@ -6,6 +6,7 @@ import React, {
   useCallback,
   ReactNode,
 } from "react";
+import { getLocalDateKey } from "../lib/dateKey";
 
 // 类型定义
 export interface PostureRecord {
@@ -42,6 +43,18 @@ export interface AlertState {
   issues: string[];
 }
 
+const DETECTION_ENABLED_KEY = "detectionEnabled";
+
+function isValidPostureRecord(record: {
+  score: number;
+  issues: string[];
+}): boolean {
+  if (record.score <= 0) return false;
+  if (record.issues.includes("noPoseDetected")) return false;
+  if (record.issues.includes("lowConfidence")) return false;
+  return true;
+}
+
 interface AppContextType {
   // 状态
   todayScore: number;
@@ -58,8 +71,8 @@ interface AppContextType {
   ) => Promise<void>;
   showAlert: (message: string, score: number, issues: string[]) => void;
   dismissAlert: () => void;
-  startDetection: () => void;
-  stopDetection: () => void;
+  startDetection: () => Promise<void>;
+  stopDetection: () => Promise<void>;
   getTodayStats: () => Promise<DailyStats>;
   getWeeklyStats: () => Promise<DailyStats[]>;
 }
@@ -90,63 +103,105 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
   const [postureHistory, setPostureHistory] = useState<PostureRecord[]>([]);
   const [isDetecting, setIsDetecting] = useState(false);
 
-  // 初始化加载设置
+  const loadTodayStats = useCallback(async () => {
+    try {
+      const today = getLocalDateKey();
+      const result = await chrome.storage.local.get(`records_${today}`);
+      const allRecords: PostureRecord[] = result[`records_${today}`] || [];
+      const records = allRecords.filter(isValidPostureRecord);
+
+      setPostureHistory(records);
+      setTodayChecks(records.length);
+
+      if (records.length > 0) {
+        const avgScore = Math.round(
+          records.reduce((sum, r) => sum + r.score, 0) / records.length,
+        );
+        setTodayScore(avgScore);
+      } else {
+        setTodayScore(0);
+      }
+    } catch (error) {
+      console.error("Failed to load today stats:", error);
+    }
+  }, []);
+
+  // 初始化加载设置和检测状态
   useEffect(() => {
-    const loadSettings = async () => {
+    const loadInitialState = async () => {
       try {
-        const result = await chrome.storage.local.get("settings");
+        const result = await chrome.storage.local.get([
+          "settings",
+          DETECTION_ENABLED_KEY,
+        ]);
         if (result.settings) {
           setSettings(result.settings);
         }
+
+        setIsDetecting(Boolean(result[DETECTION_ENABLED_KEY]));
       } catch (error) {
-        console.error("Failed to load settings:", error);
+        console.error("Failed to load initial state:", error);
       }
     };
-    loadSettings();
+    loadInitialState();
   }, []);
 
   // 加载今日统计
   useEffect(() => {
-    const loadTodayStats = async () => {
-      try {
-        const today = new Date().toISOString().split("T")[0];
-        const result = await chrome.storage.local.get(`records_${today}`);
-        if (result[`records_${today}`]) {
-          const records: PostureRecord[] = result[`records_${today}`];
-          setPostureHistory(records);
-          setTodayChecks(records.length);
-          if (records.length > 0) {
-            const avgScore = Math.round(
-              records.reduce((sum, r) => sum + r.score, 0) / records.length,
-            );
-            setTodayScore(avgScore);
-          }
-        }
-      } catch (error) {
-        console.error("Failed to load today stats:", error);
+    loadTodayStats();
+  }, [loadTodayStats]);
+
+  // 接收后台检测状态变更 / 新记录事件
+  useEffect(() => {
+    const listener = (message: { type?: string; enabled?: boolean }) => {
+      if (message.type === "DETECTION_STATE_CHANGED") {
+        setIsDetecting(Boolean(message.enabled));
+      }
+
+      if (message.type === "POSTURE_RECORDED") {
+        void loadTodayStats();
       }
     };
-    loadTodayStats();
-  }, []);
+
+    chrome.runtime.onMessage.addListener(listener);
+    return () => {
+      chrome.runtime.onMessage.removeListener(listener);
+    };
+  }, [loadTodayStats]);
 
   const updateSettings = useCallback(
     async (newSettings: Partial<Settings>) => {
       const updated = { ...settings, ...newSettings };
       setSettings(updated);
       await chrome.storage.local.set({ settings: updated });
+
+      if (
+        isDetecting &&
+        typeof newSettings.checkInterval === "number" &&
+        newSettings.checkInterval !== settings.checkInterval
+      ) {
+        await chrome.runtime.sendMessage({
+          type: "UPDATE_INTERVAL",
+          interval: newSettings.checkInterval,
+        });
+      }
     },
-    [settings],
+    [settings, isDetecting],
   );
 
   const addPostureRecord = useCallback(
     async (record: Omit<PostureRecord, "id" | "timestamp">) => {
+      if (!isValidPostureRecord(record)) {
+        return;
+      }
+
       const newRecord: PostureRecord = {
         ...record,
         id: crypto.randomUUID(),
         timestamp: Date.now(),
       };
 
-      const today = new Date().toISOString().split("T")[0];
+      const today = getLocalDateKey();
       const key = `records_${today}`;
 
       const result = await chrome.storage.local.get(key);
@@ -189,29 +244,43 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
   }, []);
 
   const startDetection = useCallback(async () => {
-    /**
-     * 「开始检测」= 启用定时提醒模式
-     * 不在此处打开摄像头，因为：
-     * 1. popup 关闭后摄像头流无法持续
-     * 2. offscreen 的 getUserMedia 在 MV3 中有 CSP 限制
-     * 真正的摄像头使用只在 DetectionPage 的手动检测中按需触发
-     */
-    setIsDetecting(true);
-    // 通知 service-worker 创建定时提醒闹钟
-    chrome.runtime.sendMessage({ type: "START_DETECTION" });
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "START_DETECTION",
+      });
+
+      if (response?.success) {
+        setIsDetecting(true);
+        await chrome.storage.local.set({ [DETECTION_ENABLED_KEY]: true });
+      } else {
+        setIsDetecting(false);
+      }
+    } catch (error) {
+      console.error("Failed to start detection:", error);
+      setIsDetecting(false);
+    }
   }, []);
 
+  const stopDetection = useCallback(async () => {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "STOP_DETECTION",
+      });
 
-  const stopDetection = useCallback(() => {
-    setIsDetecting(false);
-    // 通知 service-worker 取消定时提醒
-    chrome.runtime.sendMessage({ type: "STOP_DETECTION" });
+      if (response?.success) {
+        setIsDetecting(false);
+        await chrome.storage.local.set({ [DETECTION_ENABLED_KEY]: false });
+      }
+    } catch (error) {
+      console.error("Failed to stop detection:", error);
+    }
   }, []);
 
   const getTodayStats = useCallback(async (): Promise<DailyStats> => {
-    const today = new Date().toISOString().split("T")[0];
+    const today = getLocalDateKey();
     const result = await chrome.storage.local.get(`records_${today}`);
-    const records: PostureRecord[] = result[`records_${today}`] || [];
+    const allRecords: PostureRecord[] = result[`records_${today}`] || [];
+    const records = allRecords.filter(isValidPostureRecord);
 
     return {
       date: today,
@@ -234,9 +303,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
     for (let i = 6; i >= 0; i--) {
       const date = new Date(today);
       date.setDate(date.getDate() - i);
-      const dateStr = date.toISOString().split("T")[0];
+      const dateStr = getLocalDateKey(date);
       const result = await chrome.storage.local.get(`records_${dateStr}`);
-      const records: PostureRecord[] = result[`records_${dateStr}`] || [];
+      const allRecords: PostureRecord[] = result[`records_${dateStr}`] || [];
+      const records = allRecords.filter(isValidPostureRecord);
 
       stats.push({
         date: dateStr,

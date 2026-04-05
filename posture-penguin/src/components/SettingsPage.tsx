@@ -11,9 +11,11 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
 
   const [localSettings, setLocalSettings] = useState(settings);
   const [saved, setSaved] = useState(false);
+  const [customIntervalInput, setCustomIntervalInput] = useState("");
 
   useEffect(() => {
     setLocalSettings(settings);
+    setCustomIntervalInput(String(settings.checkInterval));
   }, [settings]);
 
   const handleSave = async () => {
@@ -22,7 +24,18 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
     setTimeout(() => setSaved(false), 2000);
   };
 
-  const intervalOptions = [10, 15, 20, 30, 45, 60];
+  const intervalOptions = [5, 10, 15, 20, 30];
+  const isCustomInterval = !intervalOptions.includes(
+    localSettings.checkInterval,
+  );
+
+  const applyCustomInterval = () => {
+    const parsed = Number.parseInt(customIntervalInput, 10);
+    if (!Number.isFinite(parsed)) return;
+    const normalized = Math.max(1, Math.min(180, parsed));
+    setLocalSettings({ ...localSettings, checkInterval: normalized });
+    setCustomIntervalInput(String(normalized));
+  };
 
   return (
     <div className={styles.container}>
@@ -59,6 +72,30 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
               </button>
             ))}
           </div>
+          <div className={styles.customIntervalRow}>
+            <input
+              type="number"
+              min={1}
+              max={180}
+              step={1}
+              value={customIntervalInput}
+              onChange={(e) => setCustomIntervalInput(e.target.value)}
+              className={styles.customIntervalInput}
+              placeholder="自定义分钟"
+            />
+            <button
+              type="button"
+              className={styles.customIntervalBtn}
+              onClick={applyCustomInterval}
+            >
+              应用
+            </button>
+          </div>
+          {isCustomInterval && (
+            <div className={styles.customIntervalHint}>
+              当前使用自定义间隔：{localSettings.checkInterval} 分钟
+            </div>
+          )}
         </div>
 
         <div className={styles.settingItem}>

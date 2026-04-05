@@ -54,9 +54,9 @@ const AlertModal: React.FC<AlertModalProps> = ({
       case "headForward":
         return "头部前倾";
       case "hunchback":
-        return "轻微驼背";
+        return "含胸驼背";
       case "misaligned":
-        return "坐姿不正";
+        return "坐姿偏歪/双肩不平衡";
       default:
         return "姿势问题";
     }
@@ -103,7 +103,7 @@ const AlertModal: React.FC<AlertModalProps> = ({
         <div className={styles.suggestion}>
           <span className={styles.suggestionIcon}>💪</span>
           <span className={styles.suggestionText}>
-            试试把肩膀向后收一下，或者站起来活动一下
+            试试收下巴、肩膀向后打开，或者站起来活动一下
           </span>
         </div>
 

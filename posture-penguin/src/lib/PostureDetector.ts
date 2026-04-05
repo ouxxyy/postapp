@@ -15,8 +15,9 @@
  */
 
 import * as poseDetection from "@tensorflow-models/pose-detection";
-import * as tf from "@tensorflow/tfjs-core";
+import "@tensorflow/tfjs-backend-cpu";
 import "@tensorflow/tfjs-backend-webgl";
+import * as tf from "@tensorflow/tfjs-core";
 
 export interface DetectionResult {
   score: number;
@@ -31,9 +32,37 @@ export interface DetectionResult {
     earShoulderHorizDist: number;
     shoulderHeightDiff: number;
     noseCenterOffset: number;
+    shoulderWidth: number;
+    torsoHeight: number;
+    neckHeight: number;
+    headWidth: number;
+    earShoulderRatio: number;
+    neckToShoulderRatio: number;
+    earToShoulderRatio: number;
+    headHorizontalRatio: number;
+    shoulderHeadWidthRatio: number;
+    torsoCompressionRatio: number;
+    shoulderTiltRatio: number;
+    hasReliableHips: boolean;
     keypointConfidences: Record<string, number>;
   };
 }
+
+type NormalizedPoint = {
+  x: number;
+  y: number;
+};
+
+export type NormalizedUpperBodyPose = {
+  nose: NormalizedPoint;
+  leftShoulder: NormalizedPoint;
+  rightShoulder: NormalizedPoint;
+  leftEar?: NormalizedPoint;
+  rightEar?: NormalizedPoint;
+  leftHip?: NormalizedPoint;
+  rightHip?: NormalizedPoint;
+  keypointConfidences?: Record<string, number>;
+};
 
 /**
  * MoveNet 关键点名称 → 索引映射（共 17 个）
@@ -59,6 +88,206 @@ const KEYPOINT = {
   right_ankle: 16,
 } as const;
 
+const roundMetric = (value: number): number =>
+  Math.round(value * 10000) / 10000;
+
+const clampScore = (value: number): number => Math.max(0, Math.min(100, value));
+
+const clampSeverity = (value: number): number =>
+  Math.max(0, Math.min(1, value));
+
+function averagePoint(a: NormalizedPoint, b: NormalizedPoint): NormalizedPoint {
+  return {
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2,
+  };
+}
+
+function estimateHipPoint(
+  shoulderMid: NormalizedPoint,
+  nose: NormalizedPoint,
+): NormalizedPoint {
+  const inferredTorsoHeight = Math.max((shoulderMid.y - nose.y) * 2.4, 0.3);
+  return {
+    x: shoulderMid.x,
+    y: Math.min(0.98, shoulderMid.y + inferredTorsoHeight),
+  };
+}
+
+async function ensurePreferredBackend(): Promise<string> {
+  await tf.ready();
+
+  for (const backend of ["webgl", "cpu"] as const) {
+    if (!tf.findBackend(backend)) {
+      continue;
+    }
+
+    try {
+      const switched = await tf.setBackend(backend);
+      if (!switched) {
+        continue;
+      }
+      await tf.ready();
+      return backend;
+    } catch (error) {
+      console.warn(`[PostureDetector] 切换 ${backend} backend 失败:`, error);
+    }
+  }
+
+  throw new Error("No TensorFlow backend available");
+}
+
+export function analyzeNormalizedUpperBodyPose(
+  pose: NormalizedUpperBodyPose,
+): Omit<DetectionResult, "landmarks"> {
+  const {
+    nose,
+    leftShoulder,
+    rightShoulder,
+    leftEar,
+    rightEar,
+    leftHip,
+    rightHip,
+    keypointConfidences = {},
+  } = pose;
+
+  const hasEars = Boolean(leftEar && rightEar);
+  const shoulderMid = averagePoint(leftShoulder, rightShoulder);
+  const reliableHipPoints = [leftHip, rightHip].filter(
+    (hip): hip is NormalizedPoint =>
+      Boolean(hip) &&
+      (hip as NormalizedPoint).y > shoulderMid.y + 0.12 &&
+      Math.abs((hip as NormalizedPoint).x - shoulderMid.x) < 0.38,
+  );
+  const hasReliableHips = reliableHipPoints.length > 0;
+  const earMid = hasEars
+    ? averagePoint(leftEar as NormalizedPoint, rightEar as NormalizedPoint)
+    : nose;
+  const hipMid =
+    reliableHipPoints.length >= 2
+      ? averagePoint(reliableHipPoints[0], reliableHipPoints[1])
+      : reliableHipPoints.length === 1
+        ? { x: shoulderMid.x, y: reliableHipPoints[0].y }
+        : estimateHipPoint(shoulderMid, nose);
+
+  const shoulderWidth = Math.max(
+    Math.abs(leftShoulder.x - rightShoulder.x),
+    0.06,
+  );
+  const torsoHeight = Math.max(Math.abs(hipMid.y - shoulderMid.y), 0.12);
+  const neckHeight = Math.max(shoulderMid.y - nose.y, 0);
+  const earShoulderVertDist = Math.max(shoulderMid.y - earMid.y, 0);
+  const earShoulderHorizDist = Math.abs(earMid.x - shoulderMid.x);
+  const headWidth = hasEars
+    ? Math.max(
+        Math.abs(
+          (leftEar as NormalizedPoint).x - (rightEar as NormalizedPoint).x,
+        ),
+        0.08,
+      )
+    : 0.08;
+  const shoulderHeightDiff = Math.abs(leftShoulder.y - rightShoulder.y);
+  const bodyMidX = (shoulderMid.x + hipMid.x) / 2;
+  const noseCenterOffset = Math.abs(nose.x - bodyMidX);
+
+  const earShoulderRatio = earShoulderVertDist / torsoHeight;
+  const neckToShoulderRatio = neckHeight / shoulderWidth;
+  const earToShoulderRatio = earShoulderVertDist / shoulderWidth;
+  const headHorizontalRatio = earShoulderHorizDist / shoulderWidth;
+  const shoulderHeadWidthRatio = shoulderWidth / headWidth;
+  const torsoCompressionRatio = torsoHeight / shoulderWidth;
+  const shoulderTiltRatio = shoulderHeightDiff / shoulderWidth;
+
+  const issues: string[] = [];
+  let score = 100;
+
+  // ─── 评分改进策略 ───
+  // 1. 提高触发阈值，减少误报
+  // 2. 渐进式扣分：轻微问题少扣，严重问题多扣
+  // 3. 增加"安全区"，忽略微小波动
+
+  // ─── 头前倾检测 ───
+  // 提高阈值：neckToShoulderRatio < 0.38（原0.42）才触发
+  // 扣分公式改为：5 + severity * 15（原10 + severity * 12）
+  const headForwardSeverity = clampSeverity(
+    Math.max(
+      (0.38 - neckToShoulderRatio) / 0.14,
+      (0.42 - earToShoulderRatio) / 0.2,
+      (headHorizontalRatio - 0.35) / 0.2,
+    ),
+  );
+  const headForward =
+    headForwardSeverity > 0.15 && // 增加安全区，忽略 < 0.15 的微小波动
+    ((neckToShoulderRatio < 0.38 && earToShoulderRatio < 0.52) ||
+      headHorizontalRatio > 0.4);
+  if (headForward) {
+    score -= Math.round(5 + headForwardSeverity * 15);
+    issues.push("headForward");
+  }
+
+  // ─── 驼背检测 ───
+  // 简化逻辑：不依赖髋部，使用上半身指标
+  // 提高阈值：earToShoulderRatio < 0.34（原0.38）才触发
+  const upperBodyHunchSeverity = clampSeverity(
+    Math.max(
+      (0.34 - earToShoulderRatio) / 0.16,
+      (0.32 - neckToShoulderRatio) / 0.14,
+      shoulderHeadWidthRatio < 2.0 ? (2.0 - shoulderHeadWidthRatio) / 0.4 : 0,
+    ),
+  );
+  const hunchback =
+    upperBodyHunchSeverity > 0.25 && // 增加安全区
+    (earToShoulderRatio < 0.4 ||
+      neckToShoulderRatio < 0.38 ||
+      shoulderHeadWidthRatio < 2.2);
+  if (hunchback) {
+    score -= Math.round(6 + upperBodyHunchSeverity * 14);
+    issues.push("hunchback");
+  }
+
+  // ─── 坐姿不正检测 ───
+  // 提高阈值，减少误报
+  const misalignmentSeverity = clampSeverity(
+    Math.max(
+      (noseCenterOffset / shoulderWidth - 0.28) / 0.15,
+      (noseCenterOffset - 0.08) / 0.05,
+      (shoulderTiltRatio - 0.25) / 0.15,
+    ),
+  );
+  const misaligned = misalignmentSeverity > 0.15;
+  if (misaligned) {
+    score -= Math.round(4 + misalignmentSeverity * 12);
+    issues.push("misaligned");
+  }
+
+  return {
+    score: clampScore(score),
+    issues,
+    headForward,
+    hunchback,
+    misaligned,
+    debug: {
+      earShoulderVertDist: roundMetric(earShoulderVertDist),
+      earShoulderHorizDist: roundMetric(earShoulderHorizDist),
+      shoulderHeightDiff: roundMetric(shoulderHeightDiff),
+      noseCenterOffset: roundMetric(noseCenterOffset),
+      shoulderWidth: roundMetric(shoulderWidth),
+      torsoHeight: roundMetric(torsoHeight),
+      neckHeight: roundMetric(neckHeight),
+      headWidth: roundMetric(headWidth),
+      earShoulderRatio: roundMetric(earShoulderRatio),
+      neckToShoulderRatio: roundMetric(neckToShoulderRatio),
+      earToShoulderRatio: roundMetric(earToShoulderRatio),
+      headHorizontalRatio: roundMetric(headHorizontalRatio),
+      shoulderHeadWidthRatio: roundMetric(shoulderHeadWidthRatio),
+      torsoCompressionRatio: roundMetric(torsoCompressionRatio),
+      shoulderTiltRatio: roundMetric(shoulderTiltRatio),
+      hasReliableHips,
+      keypointConfidences,
+    },
+  };
+}
+
 class PostureDetector {
   private detector: poseDetection.PoseDetector | null = null;
   private initState: "idle" | "pending" | "ready" | "error" = "idle";
@@ -70,7 +299,8 @@ class PostureDetector {
    */
   async init(): Promise<void> {
     if (this.initState === "ready") return;
-    if (this.initState === "pending" && this.initPromise) return this.initPromise;
+    if (this.initState === "pending" && this.initPromise)
+      return this.initPromise;
     if (this.initState === "error") {
       // 重置使其可以重试
       this.initState = "idle";
@@ -84,13 +314,12 @@ class PostureDetector {
   private async _doInit(): Promise<void> {
     try {
       console.log("[PostureDetector] 初始化 TF.js backend...");
+      const backend = await ensurePreferredBackend();
+      console.log("[PostureDetector] TF.js backend 就绪:", backend);
 
-      // 强制使用 webgl backend（Chrome Extension popup 中 webgpu 不可用）
-      await tf.setBackend("webgl");
-      await tf.ready();
-      console.log("[PostureDetector] TF.js backend 就绪:", tf.getBackend());
-
-      console.log("[PostureDetector] 创建 MoveNet SINGLEPOSE_LIGHTNING detector...");
+      console.log(
+        "[PostureDetector] 创建 MoveNet SINGLEPOSE_LIGHTNING detector...",
+      );
       this.detector = await poseDetection.createDetector(
         poseDetection.SupportedModels.MoveNet,
         {
@@ -177,28 +406,43 @@ class PostureDetector {
       };
     }
 
-    // 检查关键点置信度 — 降低到 0.2 以兼容光线不好的场景
-    const minConfidence = 0.2;
+    // 置信度阈值：自动检测场景下用户姿势不一定理想（侧身、光线差等），适当降低门槛
+    const minConfidence = 0.15; // 核心关键点（鼻子）
+    const shoulderConfidence = 0.12; // 肩膀：至少一侧达标即可
+    const earConfidence = 0.12;
+    const hipConfidence = 0.08;
     const nose = keypoints[KEYPOINT.nose];
     const leftEar = keypoints[KEYPOINT.left_ear];
     const rightEar = keypoints[KEYPOINT.right_ear];
-    const leftShoulder = keypoints[KEYPOINT.left_shoulder];
-    const rightShoulder = keypoints[KEYPOINT.right_shoulder];
+    let leftShoulder = keypoints[KEYPOINT.left_shoulder];
+    let rightShoulder = keypoints[KEYPOINT.right_shoulder];
     const leftHip = keypoints[KEYPOINT.left_hip];
     const rightHip = keypoints[KEYPOINT.right_hip];
 
-    // 检查核心关键点（鼻子 + 双肩）是否有足够置信度
-    const corePoints = [nose, leftShoulder, rightShoulder];
-    const hasValidPose = corePoints.every(
-      (kp) => kp && (kp.score ?? 0) >= minConfidence,
-    );
+    // 核心判定：鼻子必须有效 + 至少一侧肩膀有效
+    const noseValid = nose && (nose.score ?? 0) >= minConfidence;
+    const leftShoulderValid =
+      leftShoulder && (leftShoulder.score ?? 0) >= shoulderConfidence;
+    const rightShoulderValid =
+      rightShoulder && (rightShoulder.score ?? 0) >= shoulderConfidence;
+    const hasValidPose = noseValid && (leftShoulderValid || rightShoulderValid);
 
     if (!hasValidPose) {
-      const scores = corePoints.map((kp) => ({
-        name: kp === nose ? "nose" : kp === leftShoulder ? "L_shoulder" : "R_shoulder",
-        score: kp?.score ?? 0,
-      }));
-      console.warn("[PostureDetector] 关键点置信度不足:", scores);
+      const scores = [
+        { name: "nose", score: Math.round((nose?.score ?? 0) * 100) / 100 },
+        {
+          name: "L_shoulder",
+          score: Math.round((leftShoulder?.score ?? 0) * 100) / 100,
+        },
+        {
+          name: "R_shoulder",
+          score: Math.round((rightShoulder?.score ?? 0) * 100) / 100,
+        },
+      ];
+      const scoreStr = scores.map((s) => `${s.name}=${s.score}`).join(", ");
+      console.warn(
+        `[PostureDetector] 关键点置信度不足 (鼻子阈值=${minConfidence}, 肩膀阈值=${shoulderConfidence}): ${scoreStr}`,
+      );
       return {
         score: 0,
         issues: ["lowConfidence"],
@@ -208,123 +452,64 @@ class PostureDetector {
       };
     }
 
+    // 只有一侧肩膀有效时，用有效的一侧镜像估算另一侧
+    if (leftShoulderValid && !rightShoulderValid) {
+      console.log("[PostureDetector] 右肩置信度不足，使用左肩镜像估算");
+      rightShoulder = {
+        ...leftShoulder,
+        x: nose.x + (nose.x - leftShoulder.x), // 以鼻子为中心镜像
+        score: leftShoulder.score,
+      };
+    } else if (rightShoulderValid && !leftShoulderValid) {
+      console.log("[PostureDetector] 左肩置信度不足，使用右肩镜像估算");
+      leftShoulder = {
+        ...rightShoulder,
+        x: nose.x + (nose.x - rightShoulder.x), // 以鼻子为中心镜像
+        score: rightShoulder.score,
+      };
+    }
+
     // 归一化坐标到 0-1 范围
     const norm = (kp: poseDetection.Keypoint) => ({
       x: kp.x / width,
       y: kp.y / height,
     });
 
-    const nNose = norm(nose);
-    const nLeftEar = norm(leftEar);
-    const nRightEar = norm(rightEar);
-    const nLeftShoulder = norm(leftShoulder);
-    const nRightShoulder = norm(rightShoulder);
-    const nLeftHip = norm(leftHip);
-    const nRightHip = norm(rightHip);
-
-    // 检查耳朵和臀部的置信度（用于头前倾和坐姿判断）
-    const hasEars =
-      (leftEar?.score ?? 0) >= minConfidence &&
-      (rightEar?.score ?? 0) >= minConfidence;
-    const hasHips =
-      (leftHip?.score ?? 0) >= minConfidence &&
-      (rightHip?.score ?? 0) >= minConfidence;
-
-    const issues: string[] = [];
-    let score = 100;
-
-    // ─── 调试数据收集 ───
-    const earMidX = hasEars ? (nLeftEar.x + nRightEar.x) / 2 : nNose.x;
-    const earMidY = hasEars ? (nLeftEar.y + nRightEar.y) / 2 : nNose.y;
-    const shoulderMidX = (nLeftShoulder.x + nRightShoulder.x) / 2;
-    const shoulderMidY = (nLeftShoulder.y + nRightShoulder.y) / 2;
-    const earShoulderVertDist = shoulderMidY - earMidY;
-    const earShoulderHorizDist = Math.abs(earMidX - shoulderMidX);
-    const shoulderHeightDiff = Math.abs(nLeftShoulder.y - nRightShoulder.y);
-
-    const hipMidX = hasHips ? (nLeftHip.x + nRightHip.x) / 2 : shoulderMidX;
-    const bodyMidX = (shoulderMidX + hipMidX) / 2;
-    const noseCenterOffset = Math.abs(nNose.x - bodyMidX);
-
-    console.log("[PostureDetector] 姿势关键指标:", {
-      earShoulderVertDist: earShoulderVertDist.toFixed(4),
-      earShoulderHorizDist: earShoulderHorizDist.toFixed(4),
-      shoulderHeightDiff: shoulderHeightDiff.toFixed(4),
-      noseCenterOffset: noseCenterOffset.toFixed(4),
-      hasEars,
-      hasHips,
+    const normalizedAnalysis = analyzeNormalizedUpperBodyPose({
+      nose: norm(nose),
+      leftShoulder: norm(leftShoulder),
+      rightShoulder: norm(rightShoulder),
+      leftEar:
+        (leftEar?.score ?? 0) >= earConfidence ? norm(leftEar) : undefined,
+      rightEar:
+        (rightEar?.score ?? 0) >= earConfidence ? norm(rightEar) : undefined,
+      leftHip:
+        (leftHip?.score ?? 0) >= hipConfidence ? norm(leftHip) : undefined,
+      rightHip:
+        (rightHip?.score ?? 0) >= hipConfidence ? norm(rightHip) : undefined,
+      keypointConfidences: Object.fromEntries(
+        Object.entries(KEYPOINT).map(([name, idx]) => [
+          name,
+          Math.round((keypoints[idx]?.score ?? 0) * 100) / 100,
+        ]),
+      ),
     });
 
-    // ─── 1. 检测头前倾（仅在耳朵置信度足够时检测）───
-    let headForward = false;
-    if (hasEars) {
-      // 阈值说明（归一化坐标，基于 640x480 视频）：
-      // 正常坐姿：耳肩垂直距离 ≈ 0.12~0.22，水平偏移 < 0.05
-      // 头前倾：  垂直距离显著减小（< 0.08），或水平偏移增大（> 0.06）
-      if (earShoulderVertDist < 0.08) {
-        headForward = true;
-        // 渐进式扣分：越严重扣分越多
-        const severity = Math.max(0, 0.08 - earShoulderVertDist) / 0.08;
-        score -= Math.round(15 + severity * 15); // 15~30 分
-      } else if (earShoulderHorizDist > 0.06) {
-        headForward = true;
-        score -= 15;
-      }
-    }
-    if (headForward) issues.push("headForward");
-
-    // ─── 2. 检测驼背（肩膀高度差）───
-    // 正常坐姿：双肩高度差 < 0.025（归一化）
-    // 驼背倾向：> 0.035（自然偏差在 0.01~0.025 之间）
-    let hunchback = false;
-    if (shoulderHeightDiff > 0.035) {
-      hunchback = true;
-      const severity = Math.min(1, (shoulderHeightDiff - 0.035) / 0.04);
-      score -= Math.round(10 + severity * 15); // 10~25 分
-      issues.push("hunchback");
-    }
-
-    // ─── 3. 检测坐姿不正（鼻子偏离身体中线）───
-    let misaligned = false;
-    if (noseCenterOffset > 0.08) {
-      misaligned = true;
-      const severity = Math.min(1, (noseCenterOffset - 0.08) / 0.08);
-      score -= Math.round(8 + severity * 12); // 8~20 分
-      issues.push("misaligned");
-    }
-
-    score = Math.max(0, Math.min(100, score));
-
+    console.log("[PostureDetector] 姿势关键指标:", normalizedAnalysis.debug);
     console.log("[PostureDetector] 评分结果:", {
-      score,
-      issues,
-      headForward,
-      hunchback,
-      misaligned,
+      score: normalizedAnalysis.score,
+      issues: normalizedAnalysis.issues,
+      headForward: normalizedAnalysis.headForward,
+      hunchback: normalizedAnalysis.hunchback,
+      misaligned: normalizedAnalysis.misaligned,
     });
 
     // 转换为统一的 landmarks 格式供绘制骨架使用
     const landmarks = this.keypointsToLandmarks(keypoints, width, height);
 
     return {
-      score,
-      issues,
-      headForward,
-      hunchback,
-      misaligned,
+      ...normalizedAnalysis,
       landmarks,
-      debug: {
-        earShoulderVertDist,
-        earShoulderHorizDist,
-        shoulderHeightDiff,
-        noseCenterOffset,
-        keypointConfidences: Object.fromEntries(
-          Object.entries(KEYPOINT).map(([name, idx]) => [
-            name,
-            Math.round((keypoints[idx]?.score ?? 0) * 100) / 100,
-          ]),
-        ),
-      },
     };
   }
 
@@ -341,13 +526,13 @@ class PostureDetector {
     // BlazePose: 0=nose, 7=left_ear, 8=right_ear, 11=left_shoulder, 12=right_shoulder, 23=left_hip, 24=right_hip
     // MoveNet:   0=nose, 3=left_ear, 4=right_ear, 5=left_shoulder, 6=right_shoulder, 11=left_hip, 12=right_hip
     const blazeMap: Record<number, number> = {
-      0: 0,   // nose
-      7: 3,   // left_ear
-      8: 4,   // right_ear
-      11: 5,  // left_shoulder → MoveNet idx 5
-      12: 6,  // right_shoulder → MoveNet idx 6
-      13: 7,  // left_elbow
-      14: 8,  // right_elbow
+      0: 0, // nose
+      7: 3, // left_ear
+      8: 4, // right_ear
+      11: 5, // left_shoulder → MoveNet idx 5
+      12: 6, // right_shoulder → MoveNet idx 6
+      13: 7, // left_elbow
+      14: 8, // right_elbow
       23: 11, // left_hip
       24: 12, // right_hip
     };

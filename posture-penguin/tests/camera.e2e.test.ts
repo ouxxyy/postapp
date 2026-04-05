@@ -18,7 +18,13 @@
 
 // ── 测试框架 ─────────────────────────────────────────
 
-import { test, expect, chromium, ChromiumBrowser, type Page } from "@playwright/test";
+import {
+  test,
+  expect,
+  chromium,
+  ChromiumBrowser,
+  type Page,
+} from "@playwright/test";
 
 const EXTENSION_URL = "chrome-extension://<EXTENSION_ID>/popup.html";
 const EXTENSION_ID_PLACEHOLDER = "EXTENSION_ID";
@@ -71,9 +77,8 @@ test.describe.serial("摄像头调用与定时拍照 E2E", () => {
     const response = await page.evaluate(async () => {
       // 手动触发 offscreen 创建
       const response = await new Promise((resolve) => {
-        chrome.runtime.sendMessage(
-          { type: "INIT_CAMERA_REQUEST" },
-          (res) => resolve(res)
+        chrome.runtime.sendMessage({ type: "INIT_CAMERA_REQUEST" }, (res) =>
+          resolve(res),
         );
       });
       return response;
@@ -102,7 +107,9 @@ test.describe.serial("摄像头调用与定时拍照 E2E", () => {
     // 直接调用 getUserMedia 验证能力
     const result = await page.evaluate(async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+        });
         stream.getTracks().forEach((t) => t.stop());
         return { success: true };
       } catch (e: unknown) {
@@ -185,7 +192,7 @@ test.describe.serial("摄像头调用与定时拍照 E2E", () => {
     // 验证页面日志无报错
     const logs: string[] = [];
     page.on("console", (msg) => logs.push(msg.text()));
-    expect(logs.filter((l) => l.includes("FRAME_FOR_DETECTION")).toBeTruthy();
+    expect(logs.filter((l) => l.includes("FRAME_FOR_DETECTION"))).toBeTruthy();
     await context.close();
   });
 

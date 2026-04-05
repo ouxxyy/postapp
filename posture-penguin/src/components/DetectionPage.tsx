@@ -1,6 +1,11 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { useAppContext } from "../hooks/useAppContext";
 import PostureDetector from "../lib/PostureDetector";
+import {
+  getSharedPostureDetector,
+  isSharedPostureDetectorReady,
+  preloadSharedPostureDetector,
+} from "../lib/sharedPostureDetector";
 import styles from "./DetectionPage.module.css";
 
 interface DetectionPageProps {
@@ -13,22 +18,34 @@ function getPostureMessage(issueList: string[]): string {
   if (issueList.length === 0) return "姿势良好，继续保持！";
   if (issueList.length === 1) {
     switch (issueList[0]) {
-      case "headForward": return "亲，你的头有点前倾哦～试着把脖子收回来一点";
-      case "hunchback":   return "肩膀放松，不要驼背～把胸挺起来";
-      case "misaligned":  return "坐直一些吧，身体稍微正一点～";
-      case "noPoseDetected": return "没有检测到姿势，请确保摄像头对准上半身";
-      case "lowConfidence": return "画面不够清晰，请调整光线或摄像头位置";
-      default:            return "注意保持良好坐姿哦～";
+      case "headForward":
+        return "亲，你的头有点前倾哦～试着把脖子收回来一点";
+      case "hunchback":
+        return "你有点含胸驼背啦，肩膀向后打开一点，胸口轻轻抬起";
+      case "misaligned":
+        return "身体有点偏向一侧，或者双肩不太平衡，试着回到正中并放松双肩";
+      case "noPoseDetected":
+        return "没有检测到姿势，请确保摄像头对准上半身";
+      case "lowConfidence":
+        return "画面不够清晰，请调整光线或摄像头位置";
+      default:
+        return "注意保持良好坐姿哦～";
     }
   }
-  return `发现几个小问题：${issueList.map(i => {
-    switch (i) {
-      case "headForward": return "头前倾";
-      case "hunchback":   return "驼背";
-      case "misaligned":  return "坐姿不正";
-      default: return i;
-    }
-  }).join("、")}，调整一下吧～`;
+  return `发现几个小问题：${issueList
+    .map((i) => {
+      switch (i) {
+        case "headForward":
+          return "头前倾";
+        case "hunchback":
+          return "驼背";
+        case "misaligned":
+          return "偏向一侧/双肩不平衡";
+        default:
+          return i;
+      }
+    })
+    .join("、")}，调整一下吧～`;
 }
 
 function drawPose(
@@ -66,7 +83,12 @@ function drawPose(
   connections.forEach(([i, j]) => {
     const p1 = landmarks[i];
     const p2 = landmarks[j];
-    if (p1 && p2 && !(p1.x === 0 && p1.y === 0) && !(p2.x === 0 && p2.y === 0)) {
+    if (
+      p1 &&
+      p2 &&
+      !(p1.x === 0 && p1.y === 0) &&
+      !(p2.x === 0 && p2.y === 0)
+    ) {
       ctx.beginPath();
       ctx.moveTo(p1.x * W, p1.y * H);
       ctx.lineTo(p2.x * W, p2.y * H);
@@ -89,6 +111,16 @@ function getScoreEmoji(score: number): string {
   return "😟";
 }
 
+function shouldPersistDetectionResult(result: {
+  score: number;
+  issues: string[];
+}): boolean {
+  if (result.score <= 0) return false;
+  if (result.issues.includes("noPoseDetected")) return false;
+  if (result.issues.includes("lowConfidence")) return false;
+  return true;
+}
+
 // ─── 组件 ───────────────────────────────────────────────────────────────
 
 const DetectionPage: React.FC<DetectionPageProps> = ({ onBack }) => {
@@ -99,49 +131,27 @@ const DetectionPage: React.FC<DetectionPageProps> = ({ onBack }) => {
    * 避免摄像头指示灯常亮
    */
 
-  const videoRef    = useRef<HTMLVideoElement>(null);
-  const canvasRef   = useRef<HTMLCanvasElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const detectorRef = useRef<PostureDetector | null>(null);
-  const streamRef   = useRef<MediaStream | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   // 状态：idle → modelLoading → cameraReady → detecting → done
-  type DetectionPhase = "idle" | "modelLoading" | "cameraReady" | "detecting" | "done";
-  const [phase, setPhase]                  = useState<DetectionPhase>("idle");
-  const [currentScore, setCurrentScore]    = useState<number | null>(null);
-  const [issues, setIssues]                = useState<string[]>([]);
-  const [error, setError]                  = useState<string | null>(null);
-  const [modelReady, setModelReady]        = useState(false);
+  type DetectionPhase =
+    | "idle"
+    | "modelLoading"
+    | "cameraReady"
+    | "detecting"
+    | "done";
+  const [phase, setPhase] = useState<DetectionPhase>("idle");
+  const [currentScore, setCurrentScore] = useState<number | null>(null);
+  const [issues, setIssues] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [modelReady, setModelReady] = useState(() =>
+    isSharedPostureDetectorReady(),
+  );
 
   const { addPostureRecord, showAlert } = useAppContext();
-
-  // ── 预加载模型（组件 mount 时立即开始，不开摄像头）──────────────
-  useEffect(() => {
-    const preloadModel = async () => {
-      try {
-        setPhase("modelLoading");
-        detectorRef.current = new PostureDetector();
-        await detectorRef.current.init();
-        setModelReady(true);
-        setPhase("idle");
-        console.log("[DetectionPage] 模型预加载完成 ✅");
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error("[DetectionPage] 模型加载失败:", msg);
-        setError(`模型加载失败: ${msg}`);
-        setPhase("idle");
-      }
-    };
-    preloadModel();
-
-    return () => {
-      // 组件卸载时释放摄像头和模型
-      stopCamera();
-      if (detectorRef.current) {
-        detectorRef.current.destroy();
-        detectorRef.current = null;
-      }
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** 停止摄像头流并释放硬件资源 */
   const stopCamera = useCallback(() => {
@@ -154,12 +164,49 @@ const DetectionPage: React.FC<DetectionPageProps> = ({ onBack }) => {
     }
   }, []);
 
+  // ── 预加载模型（组件 mount 时立即开始，不开摄像头）──────────────
+  useEffect(() => {
+    let cancelled = false;
+
+    const preloadModel = async () => {
+      try {
+        detectorRef.current = getSharedPostureDetector();
+        if (!detectorRef.current) {
+          setPhase("modelLoading");
+          detectorRef.current = await preloadSharedPostureDetector();
+        }
+        if (cancelled) return;
+        setModelReady(true);
+        setPhase((currentPhase) =>
+          currentPhase === "modelLoading" ? "idle" : currentPhase,
+        );
+        console.log("[DetectionPage] 模型预加载完成 ✅");
+      } catch (err) {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[DetectionPage] 模型加载失败:", msg);
+        setError(`模型加载失败: ${msg}`);
+        setPhase("idle");
+      }
+    };
+    preloadModel();
+
+    return () => {
+      cancelled = true;
+      // 页面离开时只释放摄像头，模型保留在 popup 生命周期内复用
+      stopCamera();
+      detectorRef.current = null;
+    };
+  }, [stopCamera]);
+
   /** 开启摄像头 */
   const startCamera = useCallback(async (): Promise<boolean> => {
     // 先查权限状态
     let permState = "granted";
     try {
-      const perm = await navigator.permissions.query({ name: "camera" as PermissionName });
+      const perm = await navigator.permissions.query({
+        name: "camera" as PermissionName,
+      });
       permState = perm.state;
     } catch {
       permState = "granted";
@@ -171,7 +218,9 @@ const DetectionPage: React.FC<DetectionPageProps> = ({ onBack }) => {
     }
 
     if (permState === "prompt") {
-      chrome.tabs.create({ url: chrome.runtime.getURL("popup.html?requestCamera=true") });
+      chrome.tabs.create({
+        url: chrome.runtime.getURL("popup.html?requestCamera=true"),
+      });
       setError("请在弹出的授权页面中点击「允许」，完成后重新打开手动检测");
       return false;
     }
@@ -179,8 +228,8 @@ const DetectionPage: React.FC<DetectionPageProps> = ({ onBack }) => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          width:      { ideal: 640 },
-          height:     { ideal: 480 },
+          width: { ideal: 640 },
+          height: { ideal: 480 },
           facingMode: "user",
         },
       });
@@ -193,13 +242,15 @@ const DetectionPage: React.FC<DetectionPageProps> = ({ onBack }) => {
       return true;
     } catch (err) {
       const name = err instanceof DOMException ? err.name : "UnknownError";
-      const msg  = err instanceof Error ? err.message : String(err);
+      const msg = err instanceof Error ? err.message : String(err);
       console.error(`[DetectionPage] Camera error [${name}]: ${msg}`);
       stopCamera();
 
       switch (name) {
         case "NotAllowedError":
-          chrome.tabs.create({ url: chrome.runtime.getURL("popup.html?requestCamera=true") });
+          chrome.tabs.create({
+            url: chrome.runtime.getURL("popup.html?requestCamera=true"),
+          });
           setError("摄像头权限已失效，请在弹出页面重新授权");
           break;
         case "NotFoundError":
@@ -227,10 +278,7 @@ const DetectionPage: React.FC<DetectionPageProps> = ({ onBack }) => {
     if (!detectorRef.current || !modelReady) {
       try {
         setPhase("modelLoading");
-        if (!detectorRef.current) {
-          detectorRef.current = new PostureDetector();
-        }
-        await detectorRef.current.init();
+        detectorRef.current = await preloadSharedPostureDetector();
         setModelReady(true);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -276,7 +324,7 @@ const DetectionPage: React.FC<DetectionPageProps> = ({ onBack }) => {
       console.log("[DetectionPage] 检测完成:", result);
 
       // 5. 将最后一帧画面绘制到 canvas（用于显示静帧 + 骨架叠加）
-      canvas.width  = video.videoWidth;
+      canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       ctx.drawImage(video, 0, 0);
 
@@ -292,22 +340,28 @@ const DetectionPage: React.FC<DetectionPageProps> = ({ onBack }) => {
         drawPose(ctx, result.landmarks, result.score);
       }
 
-      // 保存检测记录（包裹在 try-catch 中避免影响 UI 状态）
-      try {
-        await addPostureRecord({
-          score:       result.score,
-          issues:      result.issues,
-          headForward: result.headForward,
-          hunchback:   result.hunchback,
-          misaligned:  result.misaligned,
-        });
-      } catch (recordErr) {
-        console.warn("[DetectionPage] 保存记录失败:", recordErr);
+      // 保存检测记录（无有效人体姿势时不纳入统计）
+      if (shouldPersistDetectionResult(result)) {
+        try {
+          await addPostureRecord({
+            score: result.score,
+            issues: result.issues,
+            headForward: result.headForward,
+            hunchback: result.hunchback,
+            misaligned: result.misaligned,
+          });
+        } catch (recordErr) {
+          console.warn("[DetectionPage] 保存记录失败:", recordErr);
+        }
       }
 
       // 姿势有问题时触发提醒
-      if (result.score < 70) {
-        showAlert(getPostureMessage(result.issues), result.score, result.issues);
+      if (result.score < 70 && shouldPersistDetectionResult(result)) {
+        showAlert(
+          getPostureMessage(result.issues),
+          result.score,
+          result.issues,
+        );
       }
 
       setPhase("done");
@@ -331,13 +385,18 @@ const DetectionPage: React.FC<DetectionPageProps> = ({ onBack }) => {
   }, [detect]);
 
   // ── JSX ─────────────────────────────────────────────────────────────
-  const isWorking = phase === "modelLoading" || phase === "cameraReady" || phase === "detecting";
+  const isWorking =
+    phase === "modelLoading" ||
+    phase === "cameraReady" ||
+    phase === "detecting";
 
   return (
     <div className={styles.container}>
       {/* 顶部导航 */}
       <div className={styles.header}>
-        <button className={styles.backBtn} onClick={onBack}>← 返回</button>
+        <button className={styles.backBtn} onClick={onBack}>
+          ← 返回
+        </button>
         <span className={styles.title}>姿势检测</span>
         <div style={{ width: 60 }} />
       </div>
@@ -351,10 +410,13 @@ const DetectionPage: React.FC<DetectionPageProps> = ({ onBack }) => {
             muted
             playsInline
             style={{
-              display:      phase === "cameraReady" || phase === "detecting" ? "block" : "none",
-              width:        "100%",
+              display:
+                phase === "cameraReady" || phase === "detecting"
+                  ? "block"
+                  : "none",
+              width: "100%",
               borderRadius: "12px",
-              transform:    "scaleX(-1)",
+              transform: "scaleX(-1)",
             }}
           />
 
@@ -399,7 +461,11 @@ const DetectionPage: React.FC<DetectionPageProps> = ({ onBack }) => {
           {phase === "done" && currentScore !== null && (
             <div
               className={styles.scoreOverlay}
-              style={{ "--score-color": getScoreColor(currentScore) } as React.CSSProperties}
+              style={
+                {
+                  "--score-color": getScoreColor(currentScore),
+                } as React.CSSProperties
+              }
             >
               <span className={styles.scoreNumber}>{currentScore}</span>
               <span className={styles.scoreUnit}>分</span>
@@ -424,22 +490,33 @@ const DetectionPage: React.FC<DetectionPageProps> = ({ onBack }) => {
           <div className={styles.resultCard}>
             <div className={styles.resultHeader}>
               <span className={styles.resultTitle}>检测结果</span>
-              <span className={styles.resultScore} style={{ color: getScoreColor(currentScore) }}>
+              <span
+                className={styles.resultScore}
+                style={{ color: getScoreColor(currentScore) }}
+              >
                 {getScoreEmoji(currentScore)} {currentScore}分
               </span>
             </div>
-            {issues.length > 0 && !issues.includes("noPoseDetected") && !issues.includes("lowConfidence") ? (
+            {issues.length > 0 &&
+            !issues.includes("noPoseDetected") &&
+            !issues.includes("lowConfidence") ? (
               <ul className={styles.issuesList}>
                 {issues.map((issue, idx) => (
                   <li key={idx} className={styles.issueItem}>
-                    {issue === "headForward" && "🔺 头部前倾 — 试着把脖子收回来"}
-                    {issue === "hunchback"   && "🔶 双肩高度不一 — 放松肩膀"}
-                    {issue === "misaligned"  && "↔️ 坐姿偏歪 — 身体回到正中"}
+                    {issue === "headForward" &&
+                      "🔺 头部前倾 — 试着把脖子收回来"}
+                    {issue === "hunchback" &&
+                      "🔶 含胸驼背 — 肩膀向后打开，胸口微微抬起"}
+                    {issue === "misaligned" &&
+                      "↔️ 坐姿偏歪/双肩不平衡 — 身体回到正中，双肩放松对齐"}
                   </li>
                 ))}
               </ul>
-            ) : issues.includes("noPoseDetected") || issues.includes("lowConfidence") ? (
-              <p className={styles.noDetection}>💡 {getPostureMessage(issues)}</p>
+            ) : issues.includes("noPoseDetected") ||
+              issues.includes("lowConfidence") ? (
+              <p className={styles.noDetection}>
+                💡 {getPostureMessage(issues)}
+              </p>
             ) : (
               <p className={styles.goodPosture}>🎉 姿势很棒，继续保持！</p>
             )}
@@ -450,11 +527,9 @@ const DetectionPage: React.FC<DetectionPageProps> = ({ onBack }) => {
       {/* 操作按钮 */}
       <div className={styles.actionSection}>
         {phase === "done" ? (
-          <button
-            className={styles.detectBtn}
-            onClick={redetect}
-          >
-            <span>🔄</span><span>重新检测</span>
+          <button className={styles.detectBtn} onClick={redetect}>
+            <span>🔄</span>
+            <span>重新检测</span>
           </button>
         ) : (
           <button
@@ -463,11 +538,21 @@ const DetectionPage: React.FC<DetectionPageProps> = ({ onBack }) => {
             disabled={isWorking}
           >
             {isWorking ? (
-              <><span className={styles.detectingSpinner} /><span>
-                {phase === "modelLoading" ? "加载模型中..." : phase === "cameraReady" ? "开启摄像头..." : "检测中..."}
-              </span></>
+              <>
+                <span className={styles.detectingSpinner} />
+                <span>
+                  {phase === "modelLoading"
+                    ? "加载模型中..."
+                    : phase === "cameraReady"
+                      ? "开启摄像头..."
+                      : "检测中..."}
+                </span>
+              </>
             ) : (
-              <><span>📷</span><span>开始检测</span></>
+              <>
+                <span>📷</span>
+                <span>开始检测</span>
+              </>
             )}
           </button>
         )}
@@ -476,7 +561,9 @@ const DetectionPage: React.FC<DetectionPageProps> = ({ onBack }) => {
       {/* 隐私声明 */}
       <div className={styles.privacyNotice}>
         <span className={styles.privacyIcon}>🔒</span>
-        <span className={styles.privacyText}>所有图像处理均在本地完成，不会上传到服务器</span>
+        <span className={styles.privacyText}>
+          所有图像处理均在本地完成，不会上传到服务器
+        </span>
       </div>
     </div>
   );

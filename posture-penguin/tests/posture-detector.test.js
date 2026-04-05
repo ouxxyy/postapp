@@ -2,285 +2,365 @@
 /**
  * PostureDetector 单元测试（纯 JavaScript）
  *
- * MediaPipe BlazePose 关键点索引:
- *   0=NOSE, 7=LEFT_EAR, 8=RIGHT_EAR
- *  11=LEFT_SHOULDER, 12=RIGHT_SHOULDER
- *  23=LEFT_HIP, 24=RIGHT_HIP
+ * 这里复刻 src/lib/PostureDetector.ts 中的比例化上半身几何逻辑，
+ * 重点验证头前倾、含胸驼背、坐姿偏斜和综合评分。
  */
 
-// ── 测试数据工厂 ─────────────────────────────────
+function clampScore(value) {
+  return Math.max(0, Math.min(100, value));
+}
 
-function makeLandmarks(overrides) {
-  var defaults = {
-    0:  { x: 0.5,  y: 0.1,  z: 0 },
-    7:  { x: 0.48, y: 0.05, z: 0 },
-    8:  { x: 0.52, y: 0.05, z: 0 },
-    11: { x: 0.4,  y: 0.3,  z: 0 },
-    12: { x: 0.6,  y: 0.3,  z: 0 },
-    23: { x: 0.45, y: 0.6,  z: 0 },
-    24: { x: 0.55, y: 0.6,  z: 0 },
+function clampSeverity(value) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function averagePoint(a, b) {
+  return {
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2,
   };
-  var keys = Object.keys(overrides || {});
-  for (var i = 0; i < keys.length; i++) {
-    defaults[keys[i]] = overrides[keys[i]];
+}
+
+function makePose(overrides) {
+  const pose = {
+    nose: { x: 0.5, y: 0.1 },
+    leftEar: { x: 0.48, y: 0.05 },
+    rightEar: { x: 0.52, y: 0.05 },
+    leftShoulder: { x: 0.4, y: 0.3 },
+    rightShoulder: { x: 0.6, y: 0.3 },
+    leftHip: { x: 0.45, y: 0.6 },
+    rightHip: { x: 0.55, y: 0.6 },
+  };
+
+  return Object.assign(pose, overrides || {});
+}
+
+function analyzePose(pose) {
+  const hasEars = Boolean(pose.leftEar && pose.rightEar);
+  const shoulderMid = averagePoint(pose.leftShoulder, pose.rightShoulder);
+  const reliableHipPoints = [pose.leftHip, pose.rightHip].filter(
+    (hip) =>
+      Boolean(hip) &&
+      hip.y > shoulderMid.y + 0.12 &&
+      Math.abs(hip.x - shoulderMid.x) < 0.38,
+  );
+  const hasReliableHips = reliableHipPoints.length > 0;
+  const earMid = hasEars
+    ? averagePoint(pose.leftEar, pose.rightEar)
+    : pose.nose;
+  const hipMid =
+    reliableHipPoints.length >= 2
+      ? averagePoint(reliableHipPoints[0], reliableHipPoints[1])
+      : reliableHipPoints.length === 1
+        ? { x: shoulderMid.x, y: reliableHipPoints[0].y }
+        : {
+            x: shoulderMid.x,
+            y:
+              shoulderMid.y +
+              Math.max((shoulderMid.y - pose.nose.y) * 2.4, 0.3),
+          };
+
+  const shoulderWidth = Math.max(
+    Math.abs(pose.leftShoulder.x - pose.rightShoulder.x),
+    0.06,
+  );
+  const torsoHeight = Math.max(Math.abs(hipMid.y - shoulderMid.y), 0.12);
+  const neckHeight = Math.max(shoulderMid.y - pose.nose.y, 0);
+  const earShoulderVertDist = Math.max(shoulderMid.y - earMid.y, 0);
+  const earShoulderHorizDist = Math.abs(earMid.x - shoulderMid.x);
+  const headWidth = hasEars
+    ? Math.max(Math.abs(pose.leftEar.x - pose.rightEar.x), 0.08)
+    : 0.08;
+  const shoulderHeightDiff = Math.abs(
+    pose.leftShoulder.y - pose.rightShoulder.y,
+  );
+  const bodyMidX = (shoulderMid.x + hipMid.x) / 2;
+  const noseCenterOffset = Math.abs(pose.nose.x - bodyMidX);
+
+  const earShoulderRatio = earShoulderVertDist / torsoHeight;
+  const neckToShoulderRatio = neckHeight / shoulderWidth;
+  const earToShoulderRatio = earShoulderVertDist / shoulderWidth;
+  const headHorizontalRatio = earShoulderHorizDist / shoulderWidth;
+  const shoulderHeadWidthRatio = shoulderWidth / headWidth;
+  const torsoCompressionRatio = torsoHeight / shoulderWidth;
+  const shoulderTiltRatio = shoulderHeightDiff / shoulderWidth;
+
+  const issues = [];
+  let score = 100;
+
+  const headForwardSeverity = clampSeverity(
+    Math.max(
+      (0.42 - neckToShoulderRatio) / 0.12,
+      (0.46 - earToShoulderRatio) / 0.18,
+      (headHorizontalRatio - 0.3) / 0.22,
+    ),
+  );
+  const headForward =
+    headForwardSeverity > 0 &&
+    ((neckToShoulderRatio < 0.42 && earToShoulderRatio < 0.54) ||
+      headHorizontalRatio > 0.34);
+  if (headForward) {
+    score -= Math.round(10 + headForwardSeverity * 12);
+    issues.push("headForward");
   }
-  return defaults;
-}
 
-// ── 检测函数（复刻 PostureDetector.ts 逻辑）──────────────
-
-/**
- * detectHeadForward
- * threshold: verticalDist < 0.15 || horizontalDist > 0.1
- */
-function detectHeadForward(leftEar, rightEar, leftShoulder, rightShoulder) {
-  var earMidY = (leftEar.y + rightEar.y) / 2;
-  var earMidX = (leftEar.x + rightEar.x) / 2;
-  var shoulderMidY = (leftShoulder.y + rightShoulder.y) / 2;
-  var shoulderMidX = (leftShoulder.x + rightShoulder.x) / 2;
-  var verticalDist = shoulderMidY - earMidY;
-  var horizontalDist = Math.abs(earMidX - shoulderMidX);
-  return verticalDist < 0.15 || horizontalDist > 0.1;
-}
-
-/**
- * detectHunchback
- * threshold: |leftShoulder.y - rightShoulder.y| > 0.05
- */
-function detectHunchback(leftShoulder, rightShoulder) {
-  var diff = Math.abs(leftShoulder.y - rightShoulder.y);
-  return diff > 0.05;
-}
-
-/**
- * detectMisalignment
- * threshold: |nose.x - bodyMidX| > 0.1
- */
-function detectMisalignment(nose, leftShoulder, rightShoulder, leftHip, rightHip) {
-  var shoulderMidX = (leftShoulder.x + rightShoulder.x) / 2;
-  var hipMidX = (leftHip.x + rightHip.x) / 2;
-  var bodyMidX = (shoulderMidX + hipMidX) / 2;
-  var deviation = Math.abs(nose.x - bodyMidX);
-  return deviation > 0.1;
-}
-
-/**
- * 综合评分
- */
-function scorePosture(l) {
-  var s = 100;
-  var issues = [];
-  if (detectHeadForward(l[7], l[8], l[11], l[12])) {
-    issues.push("headForward"); s -= 25;
+  const torsoCompressionSeverity = hasReliableHips
+    ? clampSeverity((1.14 - torsoCompressionRatio) / 0.18)
+    : 0;
+  const upperBackRoundSeverity = clampSeverity(
+    Math.max(
+      (0.38 - earToShoulderRatio) / 0.14,
+      (0.36 - neckToShoulderRatio) / 0.12,
+    ),
+  );
+  const upperBodyHunchSeverity =
+    shoulderHeadWidthRatio < 2.15
+      ? clampSeverity(
+          Math.max(
+            (0.78 - neckToShoulderRatio) / 0.2,
+            (0.92 - earToShoulderRatio) / 0.24,
+            (2.15 - shoulderHeadWidthRatio) / 0.35,
+          ),
+        )
+      : headForward && shoulderHeadWidthRatio < 2.55
+        ? clampSeverity(
+            Math.max(
+              (0.68 - neckToShoulderRatio) / 0.16,
+              (0.84 - earToShoulderRatio) / 0.2,
+              (2.55 - shoulderHeadWidthRatio) / 0.4,
+            ),
+          )
+        : 0;
+  const hunchbackSeverity = clampSeverity(
+    Math.max(
+      torsoCompressionSeverity,
+      hasReliableHips && headForward ? upperBackRoundSeverity * 0.6 : 0,
+      !hasReliableHips ? upperBodyHunchSeverity : 0,
+    ),
+  );
+  const hunchback =
+    hunchbackSeverity > 0 &&
+    (torsoCompressionSeverity > 0 ||
+      (hasReliableHips && headForward && upperBackRoundSeverity > 0.65) ||
+      (!hasReliableHips && upperBodyHunchSeverity > 0.72));
+  if (hunchback) {
+    score -= Math.round(10 + hunchbackSeverity * 14);
+    issues.push("hunchback");
   }
-  if (detectHunchback(l[11], l[12])) {
-    issues.push("hunchback"); s -= 20;
+
+  const misalignmentSeverity = clampSeverity(
+    Math.max(
+      (noseCenterOffset / shoulderWidth - 0.22) / 0.18,
+      (noseCenterOffset - 0.06) / 0.06,
+      (shoulderTiltRatio - 0.2) / 0.16,
+    ),
+  );
+  const misaligned = misalignmentSeverity > 0;
+  if (misaligned) {
+    score -= Math.round(8 + misalignmentSeverity * 10);
+    issues.push("misaligned");
   }
-  if (detectMisalignment(l[0], l[11], l[12], l[23], l[24])) {
-    issues.push("misaligned"); s -= 15;
-  }
-  s = Math.max(0, Math.min(100, s));
-  return { score: s, issues: issues };
+
+  return {
+    score: clampScore(score),
+    issues,
+    headForward,
+    hunchback,
+    misaligned,
+  };
 }
 
-// ── 测试用例定义 ─────────────────────────────────
-
-var TESTS = [
-  // HF-01~04: detectHeadForward
+const TESTS = [
   {
-    name: "HF-01 正常坐姿（耳在肩上）→ 不头前倾",
-    expect: false,
-    fn: function() {
-      return detectHeadForward(
-        { x: 0.5, y: 0.05 }, { x: 0.5, y: 0.05 },
-        { x: 0.4, y: 0.3 },  { x: 0.6, y: 0.3 }
-      );
-    },
+    name: "PF-01 正常坐姿 → 不触发任何问题",
+    run: () => analyzePose(makePose()),
+    assert: (result) =>
+      result.score === 100 &&
+      result.issues.length === 0 &&
+      !result.headForward &&
+      !result.hunchback &&
+      !result.misaligned,
   },
   {
-    name: "HF-02 头前倾（vertical=0.02 < 0.15）→ headForward=true",
-    expect: true,
-    fn: function() {
-      return detectHeadForward(
-        { x: 0.5, y: 0.28 }, { x: 0.5, y: 0.28 },
-        { x: 0.4, y: 0.3 },  { x: 0.6, y: 0.3 }
-      );
-    },
+    name: "PF-02 头部明显前探 → 识别 headForward",
+    run: () =>
+      analyzePose(
+        makePose({
+          nose: { x: 0.5, y: 0.22 },
+          leftEar: { x: 0.48, y: 0.24 },
+          rightEar: { x: 0.52, y: 0.24 },
+        }),
+      ),
+    assert: (result) =>
+      result.score === 79 &&
+      result.issues.join(",") === "headForward" &&
+      result.headForward,
   },
   {
-    name: "HF-03 头部偏移 horizontal=0.2 > 0.1 → headForward=true",
-    expect: true,
-    fn: function() {
-      return detectHeadForward(
-        { x: 0.7, y: 0.05 }, { x: 0.8, y: 0.05 },
-        { x: 0.4, y: 0.3 },  { x: 0.6, y: 0.3 }
-      );
-    },
+    name: "PF-03 头部整体前探偏移 → 仍能识别 headForward",
+    run: () =>
+      analyzePose(
+        makePose({
+          leftEar: { x: 0.67, y: 0.06 },
+          rightEar: { x: 0.77, y: 0.06 },
+        }),
+      ),
+    assert: (result) =>
+      result.score === 78 &&
+      result.issues.join(",") === "headForward" &&
+      result.headForward,
   },
   {
-    name: "HF-04 边界 verticalDist=0.15 → 不头前倾",
-    expect: false,
-    fn: function() {
-      return detectHeadForward(
-        { x: 0.5, y: 0.15 }, { x: 0.5, y: 0.15 },
-        { x: 0.4, y: 0.3 },  { x: 0.6, y: 0.3 }
-      );
-    },
-  },
-
-  // HB-01~04: detectHunchback
-  {
-    name: "HB-01 双肩齐平 → 不驼背",
-    expect: false,
-    fn: function() {
-      return detectHunchback({ x: 0.4, y: 0.3 }, { x: 0.6, y: 0.3 });
-    },
-  },
-  {
-    name: "HB-02 肩膀高度差 diff=0.12 > 0.05 → hunchback=true",
-    expect: true,
-    fn: function() {
-      return detectHunchback({ x: 0.4, y: 0.2 }, { x: 0.6, y: 0.32 });
-    },
+    name: "PF-04 躯干压缩含胸 → 识别 hunchback",
+    run: () =>
+      analyzePose(
+        makePose({
+          nose: { x: 0.5, y: 0.2 },
+          leftEar: { x: 0.48, y: 0.16 },
+          rightEar: { x: 0.52, y: 0.16 },
+          leftShoulder: { x: 0.4, y: 0.36 },
+          rightShoulder: { x: 0.6, y: 0.36 },
+          leftHip: { x: 0.45, y: 0.58 },
+          rightHip: { x: 0.55, y: 0.58 },
+        }),
+      ),
+    assert: (result) =>
+      result.score === 87 &&
+      result.issues.join(",") === "hunchback" &&
+      result.hunchback,
   },
   {
-    name: "HB-03 diff=0.06 > 0.05 → hunchback=true",
-    expect: true,
-    fn: function() {
-      return detectHunchback({ x: 0.4, y: 0.3 }, { x: 0.6, y: 0.36 });
-    },
+    name: "PF-05 肩膀明显一高一低 → 归入 misaligned",
+    run: () =>
+      analyzePose(
+        makePose({
+          nose: { x: 0.5, y: 0.08 },
+          leftEar: { x: 0.48, y: 0.03 },
+          rightEar: { x: 0.52, y: 0.03 },
+          leftShoulder: { x: 0.4, y: 0.22 },
+          rightShoulder: { x: 0.6, y: 0.32 },
+        }),
+      ),
+    assert: (result) =>
+      result.score === 82 &&
+      result.issues.join(",") === "misaligned" &&
+      result.misaligned,
   },
   {
-    name: "HB-04 边界 diff=0.05 → 不驼背",
-    expect: false,
-    fn: function() {
-      return detectHunchback({ x: 0.4, y: 0.3 }, { x: 0.6, y: 0.35 });
-    },
-  },
-
-  // MA-01~03: detectMisalignment
-  {
-    name: "MA-01 身体正中 → 不歪斜",
-    expect: false,
-    fn: function() {
-      return detectMisalignment(
-        { x: 0.5, y: 0.1 },
-        { x: 0.4, y: 0.3 }, { x: 0.6, y: 0.3 },
-        { x: 0.45, y: 0.6 }, { x: 0.55, y: 0.6 }
-      );
-    },
+    name: "PF-06 身体中线明显偏移 → 识别 misaligned",
+    run: () =>
+      analyzePose(
+        makePose({
+          nose: { x: 0.68, y: 0.1 },
+        }),
+      ),
+    assert: (result) =>
+      result.score === 82 &&
+      result.issues.join(",") === "misaligned" &&
+      result.misaligned,
   },
   {
-    name: "MA-02 鼻子偏右 deviation=0.3 > 0.1 → misaligned=true",
-    expect: true,
-    fn: function() {
-      return detectMisalignment(
-        { x: 0.8, y: 0.1 },
-        { x: 0.4, y: 0.3 }, { x: 0.6, y: 0.3 },
-        { x: 0.45, y: 0.6 }, { x: 0.55, y: 0.6 }
-      );
-    },
+    name: "PF-07 头前倾 + 驼背 + 歪斜 → 三项同时触发",
+    run: () =>
+      analyzePose(
+        makePose({
+          nose: { x: 0.72, y: 0.24 },
+          leftEar: { x: 0.74, y: 0.26 },
+          rightEar: { x: 0.84, y: 0.26 },
+          leftShoulder: { x: 0.42, y: 0.38 },
+          rightShoulder: { x: 0.62, y: 0.4 },
+          leftHip: { x: 0.45, y: 0.58 },
+          rightHip: { x: 0.55, y: 0.58 },
+        }),
+      ),
+    assert: (result) =>
+      result.score === 36 &&
+      result.issues.join(",") === "headForward,hunchback,misaligned" &&
+      result.headForward &&
+      result.hunchback &&
+      result.misaligned,
   },
   {
-    name: "MA-03 边界 deviation=0.1 → 不歪斜",
-    expect: false,
-    fn: function() {
-      return detectMisalignment(
-        { x: 0.6, y: 0.1 },
-        { x: 0.4, y: 0.3 }, { x: 0.6, y: 0.3 },
-        { x: 0.45, y: 0.6 }, { x: 0.55, y: 0.6 }
-      );
-    },
-  },
-
-  // SC-01~05: 综合评分
-  {
-    name: "SC-01 完美姿势 → score=100, issues=[]",
-    expect: { score: 100, issuesLen: 0 },
-    fn: function() {
-      return scorePosture(makeLandmarks({}));
-    },
+    name: "PF-08 仅拍到上半身且髋部缺失 → 不应稳定误报 hunchback",
+    run: () =>
+      analyzePose({
+        nose: { x: 0.5, y: 0.34 },
+        leftEar: { x: 0.46, y: 0.33 },
+        rightEar: { x: 0.54, y: 0.33 },
+        leftShoulder: { x: 0.39, y: 0.46 },
+        rightShoulder: { x: 0.61, y: 0.46 },
+      }),
+    assert: (result) =>
+      result.score === 100 && result.issues.length === 0 && !result.hunchback,
   },
   {
-    name: "SC-02 headForward only → score=75, issues=[headForward]",
-    expect: { score: 75, issuesLen: 1 },
-    fn: function() {
-      return scorePosture(makeLandmarks({
-        7: { x: 0.6, y: 0.28 }, 8: { x: 0.7, y: 0.28 }
-      }));
-    },
+    name: "PF-09 靠近摄像头但髋部缺失 → 不应仅因构图触发问题",
+    run: () =>
+      analyzePose({
+        nose: { x: 0.5, y: 0.42 },
+        leftEar: { x: 0.47, y: 0.41 },
+        rightEar: { x: 0.53, y: 0.41 },
+        leftShoulder: { x: 0.41, y: 0.5 },
+        rightShoulder: { x: 0.59, y: 0.5 },
+      }),
+    assert: (result) =>
+      result.score === 100 &&
+      result.issues.length === 0 &&
+      !result.hunchback &&
+      !result.headForward,
   },
   {
-    name: "SC-03 headForward+hunchback → score=55, issues=2",
-    expect: { score: 55, issuesLen: 2 },
-    fn: function() {
-      return scorePosture(makeLandmarks({
-        7:  { x: 0.6, y: 0.28 }, 8:  { x: 0.7, y: 0.28 },
-        11: { x: 0.35, y: 0.2 }, 12: { x: 0.65, y: 0.3 },
-      }));
-    },
-  },
-  {
-    name: "SC-04 全触发 → score=40, issues=3",
-    expect: { score: 40, issuesLen: 3 },
-    fn: function() {
-      return scorePosture(makeLandmarks({
-        0:  { x: 0.75, y: 0.1 },
-        7:  { x: 0.7,  y: 0.28 }, 8:  { x: 0.8, y: 0.28 },
-        11: { x: 0.35, y: 0.2 }, 12: { x: 0.65, y: 0.3 },
-      }));
-    },
-  },
-  {
-    name: "SC-05 极差姿势 → score=40 (扣25+20+15=60), issues=3",
-    expect: { score: 40, issuesLen: 3 },
-    fn: function() {
-      return scorePosture(makeLandmarks({
-        0:  { x: 1.0, y: 0.1 },
-        7:  { x: 0.9,  y: 0.4 }, 8:  { x: 1.0, y: 0.4 },
-        11: { x: 0.2,  y: 0.1 }, 12: { x: 0.8, y: 0.3 },
-      }));
-    },
+    name: "PF-10 单侧髋部可见的含胸驼背 → 仍应识别 hunchback",
+    run: () =>
+      analyzePose(
+        makePose({
+          nose: { x: 0.5, y: 0.2 },
+          leftEar: { x: 0.48, y: 0.16 },
+          rightEar: { x: 0.52, y: 0.16 },
+          leftShoulder: { x: 0.4, y: 0.36 },
+          rightShoulder: { x: 0.6, y: 0.36 },
+          rightHip: { x: 0.55, y: 0.58 },
+          leftHip: undefined,
+        }),
+      ),
+    assert: (result) =>
+      result.score === 87 &&
+      result.issues.join(",") === "hunchback" &&
+      result.hunchback,
   },
 ];
 
-// ── 运行测试 ─────────────────────────────────────────
-
-var passed = 0;
-var failed = 0;
+let passed = 0;
+let failed = 0;
 
 console.log("\n\x1b[36m═══ PostureDetector 单元测试 ═══\x1b[0m\n");
 
-for (var i = 0; i < TESTS.length; i++) {
-  var t = TESTS[i];
-  var result;
+for (const testCase of TESTS) {
   try {
-    result = t.fn();
-  } catch (e) {
-    console.log("  \x1b[31m✗ " + t.name + "\x1b[0m  → " + e.message);
+    const result = testCase.run();
+    if (testCase.assert(result)) {
+      console.log(`  \x1b[32m✓\x1b[0m ${testCase.name}`);
+      passed++;
+      continue;
+    }
+
+    console.log(
+      `  \x1b[31m✗\x1b[0m ${testCase.name} → got score=${result.score} issues=${JSON.stringify(result.issues)}`,
+    );
     failed++;
-    continue;
-  }
-
-  var ok;
-  if (typeof t.expect === "boolean") {
-    ok = result === t.expect;
-  } else if (typeof t.expect === "object") {
-    ok = result.score === t.expect.score && result.issues.length === t.expect.issuesLen;
-  }
-
-  if (ok) {
-    console.log("  \x1b[32m✓\x1b[0m " + t.name);
-    passed++;
-  } else {
-    console.log("  \x1b[31m✗\x1b[0m " + t.name + "  → got score=" + result.score + " issues=" + JSON.stringify(result.issues));
+  } catch (error) {
+    console.log(
+      `  \x1b[31m✗\x1b[0m ${testCase.name} → ${error instanceof Error ? error.message : String(error)}`,
+    );
     failed++;
   }
 }
 
-console.log("\x1b[36m" + "═".repeat(50) + "\x1b[0m");
-console.log("结果: \x1b[32m" + passed + " 通过\x1b[0m / \x1b[31m" + failed + " 失败\x1b[0m\n");
+console.log(`\x1b[36m${"═".repeat(50)}\x1b[0m`);
+console.log(
+  `结果: \x1b[32m${passed} 通过\x1b[0m / \x1b[31m${failed} 失败\x1b[0m\n`,
+);
 
 if (failed > 0) {
-  require("child_process").exec("exit 1");
+  process.exit(1);
 }

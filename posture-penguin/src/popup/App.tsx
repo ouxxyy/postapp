@@ -6,15 +6,24 @@ import StatsPage from "../components/StatsPage";
 import AlertModal from "../components/AlertModal";
 import PermissionPage from "../components/PermissionPage";
 import { AppProvider, useAppContext } from "../hooks/useAppContext";
+import { preloadSharedPostureDetector } from "../lib/sharedPostureDetector";
 
 type PageType = "home" | "detection" | "settings" | "stats" | "permission";
 
 const AppContent: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<PageType>(() => {
-    const isRequestingCamera = new URLSearchParams(window.location.search).get("requestCamera") === "true";
+    const isRequestingCamera =
+      new URLSearchParams(window.location.search).get("requestCamera") ===
+      "true";
     return isRequestingCamera ? "permission" : "home";
   });
   const { alertState, dismissAlert } = useAppContext();
+
+  useEffect(() => {
+    preloadSharedPostureDetector().catch((error) => {
+      console.warn("[App] 检测模型预加载失败:", error);
+    });
+  }, []);
 
   const renderPage = () => {
     switch (currentPage) {
