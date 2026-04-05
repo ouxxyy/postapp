@@ -1,0 +1,237 @@
+.container {
+  padding: 16px;
+  background: var(--color-bg);
+  min-height: 100%;
+  padding-bottom: 24px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.backBtn {
+  padding: 8px 12px;
+  border: none;
+  background: var(--color-card);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.backBtn:hover {
+  background: var(--color-bg-alt);
+  color: var(--color-text);
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+/* Summary Grid */
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.summaryCard {
+  background: var(--color-card);
+  border-radius: var(--radius-md);
+  padding: 16px 12px;
+  text-align: center;
+  box-shadow: var(--shadow-card);
+}
+
+.summaryValue {
+  font-size: 28px;
+  font-weight: 800;
+  font-family: var(--font-display);
+  color: var(--color-text);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.summaryLabel {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+/* View Toggle */
+.viewToggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  position: relative;
+}
+
+.toggleBtn {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid var(--color-bg-alt);
+  background: var(--color-card);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.toggleBtn.active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: white;
+}
+
+.premiumBadge {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 12px;
+  padding: 2px 8px;
+  background: var(--color-warning);
+  color: white;
+  border-radius: 4px;
+}
+
+/* Chart Section */
+.chartSection {
+  background: var(--color-card);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  margin-bottom: 24px;
+  box-shadow: var(--shadow-card);
+}
+
+.chartTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 16px;
+}
+
+.chartWrapper {
+  margin: 0 -8px;
+}
+
+.loading,
+.noData {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+/* Premium Section */
+.premiumSection {
+  margin-bottom: 24px;
+}
+
+.premiumCard {
+  background: linear-gradient(135deg, #fff5f5 0%, #fff8f0 100%);
+  border: 1px solid var(--color-primary-light);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  text-align: center;
+}
+
+.premiumHeader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.premiumIcon {
+  font-size: 24px;
+}
+
+.premiumTitle {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-primary-dark);
+}
+
+.premiumDesc {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.premiumBtn {
+  padding: 12px 32px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.premiumBtn:hover {
+  background: var(--color-primary-dark);
+}
+
+/* Tips Section */
+.tipsSection {
+  background: var(--color-card);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  box-shadow: var(--shadow-card);
+}
+
+.tipsTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 12px;
+}
+
+.tipsList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.tipItem {
+  display: flex;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-bg-alt);
+}
+
+.tipItem:last-child {
+  border-bottom: none;
+}
+
+.tipIcon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.tipContent strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 2px;
+}
+
+.tipContent p {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
