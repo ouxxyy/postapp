@@ -63,6 +63,7 @@ interface AppContextType {
   alertState: AlertState;
   postureHistory: PostureRecord[];
   isDetecting: boolean;
+  recentRecords: PostureRecord[]; // 最近 5 条检测记录
 
   // 方法
   updateSettings: (newSettings: Partial<Settings>) => Promise<void>;
@@ -75,6 +76,7 @@ interface AppContextType {
   stopDetection: () => Promise<void>;
   getTodayStats: () => Promise<DailyStats>;
   getWeeklyStats: () => Promise<DailyStats[]>;
+  getRecentRecords: () => Promise<PostureRecord[]>; // 获取最近 5 条记录
 }
 
 const defaultSettings: Settings = {
@@ -102,6 +104,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
   });
   const [postureHistory, setPostureHistory] = useState<PostureRecord[]>([]);
   const [isDetecting, setIsDetecting] = useState(false);
+  const [recentRecords, setRecentRecords] = useState<PostureRecord[]>([]);
 
   const loadTodayStats = useCallback(async () => {
     try {
@@ -325,6 +328,53 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
     return stats;
   }, []);
 
+  // 获取最近 5 条检测记录（跨多日）
+  const getRecentRecords = useCallback(async (): Promise<PostureRecord[]> => {
+    const allRecords: PostureRecord[] = [];
+    const today = new Date();
+
+    // 从今天往前查 7 天，收集所有有效记录
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(today);
+      date.setDate(date.getDate() - i);
+      const dateStr = getLocalDateKey(date);
+      const result = await chrome.storage.local.get(`records_${dateStr}`);
+      const records: PostureRecord[] = result[`records_${dateStr}`] || [];
+      allRecords.push(...records.filter(isValidPostureRecord));
+    }
+
+    // 按时间戳降序排序，取最近 5 条
+    const sortedRecords = allRecords
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 5);
+
+    return sortedRecords;
+  }, []);
+
+  // 加载最近记录
+  const loadRecentRecords = useCallback(async () => {
+    const records = await getRecentRecords();
+    setRecentRecords(records);
+  }, [getRecentRecords]);
+
+  // 初始化加载最近记录
+  useEffect(() => {
+    loadRecentRecords();
+  }, [loadRecentRecords]);
+
+  // 监听新记录事件，刷新最近记录
+  useEffect(() => {
+    const listener = (message: { type?: string }) => {
+      if (message.type === "POSTURE_RECORDED") {
+        void loadRecentRecords();
+      }
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    return () => {
+      chrome.runtime.onMessage.removeListener(listener);
+    };
+  }, [loadRecentRecords]);
+
   const value: AppContextType = {
     todayScore,
     todayChecks,
@@ -332,6 +382,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
     alertState,
     postureHistory,
     isDetecting,
+    recentRecords,
     updateSettings,
     addPostureRecord,
     showAlert,
@@ -340,6 +391,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
     stopDetection,
     getTodayStats,
     getWeeklyStats,
+    getRecentRecords,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

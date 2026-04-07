@@ -48,11 +48,12 @@ const StatsPage: React.FC<StatsPageProps> = ({ onBack }) => {
     return `周${weekdays[date.getDay()]}`;
   };
 
+  // 计算本周平均分（只计算有数据的天数）
+  const validDays = weeklyData.filter((d) => d.totalChecks > 0);
   const avgScore =
-    weeklyData.length > 0
+    validDays.length > 0
       ? Math.round(
-          weeklyData.reduce((sum, d) => sum + d.avgScore, 0) /
-            weeklyData.length,
+          validDays.reduce((sum, d) => sum + d.avgScore, 0) / validDays.length,
         )
       : 0;
 

@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { useAppContext } from "../hooks/useAppContext";
 import styles from "./HomePage.module.css";
+import HistorySection from "./HistorySection";
 
 type PageType = "home" | "detection" | "settings" | "stats";
 
@@ -158,6 +159,9 @@ const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
           </button>
         </div>
       </div>
+
+      {/* Recent Detection History */}
+      <HistorySection />
 
       {/* Daily Tip */}
       <div className={styles.tipSection}>
