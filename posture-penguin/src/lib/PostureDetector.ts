@@ -320,10 +320,18 @@ class PostureDetector {
       console.log(
         "[PostureDetector] 创建 MoveNet SINGLEPOSE_LIGHTNING detector...",
       );
+
+      // 使用本地模型路径（离线支持）
+      const localModelUrl = chrome.runtime.getURL(
+        "models/movenet-singlepose-lightning/model.json",
+      );
+      console.log("[PostureDetector] 使用本地模型:", localModelUrl);
+
       this.detector = await poseDetection.createDetector(
         poseDetection.SupportedModels.MoveNet,
         {
           modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
+          modelUrl: localModelUrl,
           enableSmoothing: true,
         },
       );
