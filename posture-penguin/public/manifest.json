@@ -4,6 +4,10 @@
   "version": "1.0.1",
   "description": "一个可爱的企鹅助手，帮助你在工作时保持良好坐姿。定时检测、温柔提醒、数据统计。",
   "permissions": ["storage", "alarms", "notifications", "tabs", "offscreen"],
+  "host_permissions": [
+    "https://tfhub.dev/*",
+    "https://storage.googleapis.com/*"
+  ],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
@@ -39,6 +43,6 @@
     }
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' https://tfhub.dev https://storage.googleapis.com"
   }
 }
