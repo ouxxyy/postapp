@@ -248,6 +248,34 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
 
   const startDetection = useCallback(async () => {
     try {
+      // 首次使用：检查摄像头权限，未授权则跳转到 DetectionPage 走完整授权流程
+      let permState: PermissionState = "granted";
+      try {
+        const perm = await navigator.permissions.query({
+          name: "camera" as PermissionName,
+        });
+        permState = perm.state;
+      } catch {
+        // permissions API 不支持时默认尝试启动（getUserMedia 会在后续步骤中处理）
+      }
+
+      if (permState === "denied") {
+        // 权限已拒绝：打开 DetectionPage 显示手动授权提示
+        chrome.tabs.create({
+          url: chrome.runtime.getURL("popup.html?page=detection"),
+        });
+        return;
+      }
+
+      if (permState === "prompt") {
+        // 权限未决定：打开 DetectionPage，由其引导用户完成授权
+        chrome.tabs.create({
+          url: chrome.runtime.getURL("popup.html?page=detection"),
+        });
+        return;
+      }
+
+      // 权限已授权：正常启动定时检测
       const response = await chrome.runtime.sendMessage({
         type: "START_DETECTION",
       });

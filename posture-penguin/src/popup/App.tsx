@@ -12,10 +12,17 @@ type PageType = "home" | "detection" | "settings" | "stats" | "permission";
 
 const AppContent: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<PageType>(() => {
-    const isRequestingCamera =
-      new URLSearchParams(window.location.search).get("requestCamera") ===
-      "true";
-    return isRequestingCamera ? "permission" : "home";
+    const params = new URLSearchParams(window.location.search);
+    const isRequestingCamera = params.get("requestCamera") === "true";
+    if (isRequestingCamera) return "permission";
+    const page = params.get("page") as PageType | null;
+    if (
+      page &&
+      ["home", "detection", "settings", "stats", "permission"].includes(page)
+    ) {
+      return page;
+    }
+    return "home";
   });
   const { alertState, dismissAlert } = useAppContext();
 
