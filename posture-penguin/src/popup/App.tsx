@@ -5,10 +5,17 @@ import SettingsPage from "../components/SettingsPage";
 import StatsPage from "../components/StatsPage";
 import AlertModal from "../components/AlertModal";
 import PermissionPage from "../components/PermissionPage";
+import PosterPage from "../components/PosterPage";
 import { AppProvider, useAppContext } from "../hooks/useAppContext";
 import { preloadSharedPostureDetector } from "../lib/sharedPostureDetector";
 
-type PageType = "home" | "detection" | "settings" | "stats" | "permission";
+type PageType =
+  | "home"
+  | "detection"
+  | "settings"
+  | "stats"
+  | "permission"
+  | "poster";
 
 const AppContent: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<PageType>(() => {
@@ -18,7 +25,14 @@ const AppContent: React.FC = () => {
     const page = params.get("page") as PageType | null;
     if (
       page &&
-      ["home", "detection", "settings", "stats", "permission"].includes(page)
+      [
+        "home",
+        "detection",
+        "settings",
+        "stats",
+        "permission",
+        "poster",
+      ].includes(page)
     ) {
       return page;
     }
@@ -42,6 +56,8 @@ const AppContent: React.FC = () => {
         return <SettingsPage onBack={() => setCurrentPage("home")} />;
       case "stats":
         return <StatsPage onBack={() => setCurrentPage("home")} />;
+      case "poster":
+        return <PosterPage onBack={() => setCurrentPage("home")} />;
       case "permission":
         return <PermissionPage />;
       default:

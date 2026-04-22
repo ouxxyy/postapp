@@ -1,1 +1,362 @@
-(()=>{"use strict";const e={checkInterval:20,soundEnabled:!0,soundVolume:.5,dailyStartTime:"09:00",dailyEndTime:"18:00",isPremium:!1},r="detectionEnabled",t="postureCheck",o="cleanupOldData";let n=!1,c=!1;async function s(e){return new Promise(r=>{chrome.runtime.sendMessage(e,e=>{chrome.runtime.lastError?r(null):r(e??null)})})}async function a(e=8e3){const r=Date.now();for(;Date.now()-r<e;){const e=await s({type:"PING_OFFSCREEN"});if(e?.ready)return!0;await new Promise(e=>setTimeout(e,120))}return!1}async function i(){return chrome.runtime.getContexts?(await chrome.runtime.getContexts({contextTypes:[chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],documentUrls:[chrome.runtime.getURL("offscreen.html")]})).length>0:n}async function l(){if(await i())return n=!0,!0;try{return await chrome.offscreen.createDocument({url:"offscreen.html",reasons:[chrome.offscreen.Reason.USER_MEDIA],justification:"摄像头访问用于姿势检测"}),n=!0,console.log("[BG] Offscreen document created"),!0}catch(e){return console.error("[BG] Failed to create offscreen document:",e),!1}}async function u(){if(!await l())return!1;if(!await a())return console.warn("[BG] Offscreen document did not become ready for prewarm"),!1;const e=await async function(){return s({type:"PING_OFFSCREEN"})}();if(e?.detectorReady)return!0;const r=await s({type:"PREWARM_DETECTOR"});return!!r?.success||(console.warn("[BG] Detector prewarm failed:",r?.error||"unknown"),!1)}async function m(){const r=await chrome.storage.local.get("settings");return{...e,...r.settings||{}}}async function d(){const e=await chrome.storage.local.get(r);return Boolean(e[r])}async function f(e){await chrome.storage.local.set({[r]:e}),function(e){chrome.runtime.sendMessage({type:"DETECTION_STATE_CHANGED",enabled:e},()=>{chrome.runtime.lastError})}(e)}async function g(e){const r=Math.max(1,e),o=await chrome.alarms.get(t);o&&o.periodInMinutes===r?console.log(`[BG] 闹钟已存在且间隔一致（${r}分钟），跳过重建`):(await new Promise(e=>{chrome.alarms.clear(t,()=>{chrome.runtime.lastError,e()})}),chrome.alarms.create(t,{delayInMinutes:r,periodInMinutes:r}),console.log(`[BG] 闹钟已创建: delay=${r}min, period=${r}min`))}async function h(){if(!await d())return console.log("[BG] ensureDetectionRuntime: 检测未启用，清除闹钟"),void await new Promise(e=>{chrome.alarms.clear(t,()=>{chrome.runtime.lastError,e()})});const e=await m();console.log(`[BG] ensureDetectionRuntime: 检测已启用，间隔=${e.checkInterval}分钟`),await g(e.checkInterval),u().catch(e=>{console.warn("[BG] ensureDetectionRuntime: 预热模型失败（不影响闹钟）:",e)})}chrome.runtime.onInstalled.addListener(async()=>{const t=await chrome.storage.local.get(["settings",r]),o={...e,...t.settings||{}};await chrome.storage.local.set({settings:o}),"boolean"!=typeof t[r]&&await chrome.storage.local.set({[r]:!1}),await h(),console.log("姿势企鹅已安装并初始化")}),chrome.runtime.onStartup.addListener(()=>{h().catch(e=>{console.error("[BG] 恢复检测状态失败:",e)})}),console.log("[BG] Service Worker 启动"),chrome.alarms.onAlarm.addListener(async e=>{if(e.name!==t)return;if(!await d())return void console.log("[BG] ⏰ 闹钟触发但检测未启用，跳过");const r=await m(),o=new Date;if(!function(e,r){const t=60*r.getHours()+r.getMinutes(),[o,n]=e.dailyStartTime.split(":").map(Number),[c,s]=e.dailyEndTime.split(":").map(Number);return t>=60*o+n&&t<=60*c+s}(r,o))return void console.log(`[BG] ⏰ 当前时间 ${o.getHours()}:${String(o.getMinutes()).padStart(2,"0")} 不在检测窗口 ${r.dailyStartTime}~${r.dailyEndTime} 内，跳过`);console.log("[BG] ⏰ 定时检测触发，开始执行姿势检测...");const n=await async function(){if(console.log("[BG] runOnePostureCheck: 创建/确认 offscreen document..."),!await l())return console.error("[BG] runOnePostureCheck: offscreen 创建失败"),{success:!1,error:"offscreen_create_failed"};if(console.log("[BG] runOnePostureCheck: 等待 offscreen 就绪..."),!await a())return console.error("[BG] runOnePostureCheck: offscreen 未在超时内就绪"),{success:!1,error:"offscreen_not_ready"};console.log("[BG] runOnePostureCheck: 发送 ANALYZE_POSTURE 消息...");const e=await s({type:"ANALYZE_POSTURE"});return e?(console.log("[BG] runOnePostureCheck: 收到响应",e.success?"✅":`❌ ${e.error}`),e):(console.error("[BG] runOnePostureCheck: offscreen 未响应"),{success:!1,error:"offscreen 未响应"})}();if(!n.success||!n.result){const e=n.error||"unknown";return console.warn("[BG] 自动姿势检测失败:",e),void((e.includes("camera")||e.includes("offscreen")||e.includes("not_ready"))&&chrome.notifications.create(`postureReminder-${Date.now()}`,{type:"basic",iconUrl:"icons/icon128.png",title:"🐧 姿势企鹅提醒",message:`自动检测遇到问题：${e}。将在下次定时重试。`,priority:1}))}var c;(c=n.result).score<=0||c.issues.includes("noPoseDetected")||c.issues.includes("lowConfidence")?console.log("[BG] 检测结果无效（无人/低置信度），跳过",n.result.issues):(console.log(`[BG] ✅ 自动检测完成: 评分=${n.result.score}, 问题=${n.result.issues.join(",")||"无"}`),await async function(e){try{const r=`records_${function(e=new Date){return`${e.getFullYear()}-${String(e.getMonth()+1).padStart(2,"0")}-${String(e.getDate()).padStart(2,"0")}`}()}`,t={id:crypto.randomUUID(),timestamp:Date.now(),score:e.score,issues:e.issues,headForward:e.headForward,hunchback:e.hunchback,misaligned:e.misaligned},o=(await chrome.storage.local.get(r))[r]||[];await chrome.storage.local.set({[r]:[...o,t]}),console.log(`[BG] 检测记录已保存: 评分=${e.score}, 今日检测次数=${o.length+1}`)}catch(e){console.error("[BG] 保存检测记录失败:",e)}}(n.result),n.result.score<70&&function(e,r){const t=r.length>0?`问题：${r.join("、")}`:"检测到姿势异常，请调整坐姿";chrome.notifications.create(`postureReminder-${Date.now()}`,{type:"basic",iconUrl:"icons/icon128.png",title:"🐧 姿势企鹅提醒",message:`当前姿势评分 ${e} 分。${t}`,priority:2})}(n.result.score,n.result.issues))}),chrome.runtime.onMessage.addListener((e,r,o)=>"OFFSCREEN_READY"===e.type?(n=!0,console.log("[BG] Offscreen document ready"),!1):"CAMERA_READY"===e.type?(c=Boolean(e.success),console.log("[BG] Camera ready:",e.success,e.error||""),!1):"START_DETECTION"===e.type?((async()=>{await f(!0);const e=await m();console.log(`[BG] START_DETECTION: 启用检测，间隔=${e.checkInterval}分钟`),await g(e.checkInterval),u().catch(e=>{console.warn("[BG] START_DETECTION: 预热模型失败（不影响检测）:",e)}),o({success:!0,cameraReady:!1})})().catch(e=>{console.error("[BG] START_DETECTION failed:",e),o({success:!1,error:String(e)})}),!0):"STOP_DETECTION"===e.type?((async()=>{await f(!1),chrome.alarms.clear(t),await async function(){await s({type:"STOP_CAMERA"}),c=!1}(),await async function(){if(!await i())return n=!1,void(c=!1);try{await chrome.offscreen.closeDocument(),n=!1,c=!1,console.log("[BG] Offscreen document closed")}catch(e){console.error("[BG] Failed to close offscreen document:",e)}}(),o({success:!0})})().catch(e=>{console.error("[BG] STOP_DETECTION failed:",e),o({success:!1,error:String(e)})}),!0):"GET_DETECTION_STATUS"===e.type?((async()=>{o({enabled:await d(),cameraReady:c})})().catch(()=>{o({enabled:!1,cameraReady:!1})}),!0):"UPDATE_INTERVAL"===e.type?((async()=>{await d()&&"number"==typeof e.interval&&g(e.interval),o({success:!0})})().catch(e=>{console.error("[BG] UPDATE_INTERVAL failed:",e),o({success:!1,error:String(e)})}),!0):"SHOW_NOTIFICATION"===e.type&&(chrome.notifications.create({type:"basic",iconUrl:"icons/icon128.png",title:"姿势企鹅提醒",message:e.message,priority:2}),!1)),chrome.alarms.create(o,{periodInMinutes:1440}),chrome.alarms.onAlarm.addListener(async e=>{if(e.name!==o)return;const r=new Date;r.setDate(r.getDate()-90);const t=await chrome.storage.local.get(null),n=[];for(const e of Object.keys(t))if(e.startsWith("records_")){const t=e.replace("records_","");new Date(t)<r&&n.push(e)}n.length>0&&(await chrome.storage.local.remove(n),console.log(`清理了 ${n.length} 天的旧数据`))})})();
+(() => {
+  "use strict";
+  const e = {
+      checkInterval: 20,
+      soundEnabled: !0,
+      soundVolume: 0.5,
+      dailyStartTime: "09:00",
+      dailyEndTime: "18:00",
+      isPremium: !1,
+    },
+    r = "detectionEnabled",
+    t = "postureCheck",
+    o = "cleanupOldData";
+  let n = !1,
+    c = !1;
+  async function s(e) {
+    return new Promise((r) => {
+      chrome.runtime.sendMessage(e, (e) => {
+        chrome.runtime.lastError ? r(null) : r(e ?? null);
+      });
+    });
+  }
+  async function a(e = 8e3) {
+    const r = Date.now();
+    for (; Date.now() - r < e; ) {
+      const e = await s({ type: "PING_OFFSCREEN" });
+      if (e?.ready) return !0;
+      await new Promise((e) => setTimeout(e, 120));
+    }
+    return !1;
+  }
+  async function i() {
+    return chrome.runtime.getContexts
+      ? (
+          await chrome.runtime.getContexts({
+            contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
+            documentUrls: [chrome.runtime.getURL("offscreen.html")],
+          })
+        ).length > 0
+      : n;
+  }
+  async function l() {
+    if (await i()) return ((n = !0), !0);
+    try {
+      return (
+        await chrome.offscreen.createDocument({
+          url: "offscreen.html",
+          reasons: [chrome.offscreen.Reason.USER_MEDIA],
+          justification: "摄像头访问用于姿势检测",
+        }),
+        (n = !0),
+        console.log("[BG] Offscreen document created"),
+        !0
+      );
+    } catch (e) {
+      return (
+        console.error("[BG] Failed to create offscreen document:", e),
+        !1
+      );
+    }
+  }
+  async function u() {
+    if (!(await l())) return !1;
+    if (!(await a()))
+      return (
+        console.warn(
+          "[BG] Offscreen document did not become ready for prewarm",
+        ),
+        !1
+      );
+    const e = await (async function () {
+      return s({ type: "PING_OFFSCREEN" });
+    })();
+    if (e?.detectorReady) return !0;
+    const r = await s({ type: "PREWARM_DETECTOR" });
+    return (
+      !!r?.success ||
+      (console.warn("[BG] Detector prewarm failed:", r?.error || "unknown"), !1)
+    );
+  }
+  async function m() {
+    const r = await chrome.storage.local.get("settings");
+    return { ...e, ...(r.settings || {}) };
+  }
+  async function d() {
+    const e = await chrome.storage.local.get(r);
+    return Boolean(e[r]);
+  }
+  async function f(e) {
+    (await chrome.storage.local.set({ [r]: e }),
+      (function (e) {
+        chrome.runtime.sendMessage(
+          { type: "DETECTION_STATE_CHANGED", enabled: e },
+          () => {
+            chrome.runtime.lastError;
+          },
+        );
+      })(e));
+  }
+  async function g(e) {
+    const r = Math.max(1, e),
+      o = await chrome.alarms.get(t);
+    o && o.periodInMinutes === r
+      ? console.log(`[BG] 闹钟已存在且间隔一致（${r}分钟），跳过重建`)
+      : (await new Promise((e) => {
+          chrome.alarms.clear(t, () => {
+            (chrome.runtime.lastError, e());
+          });
+        }),
+        chrome.alarms.create(t, { delayInMinutes: r, periodInMinutes: r }),
+        console.log(`[BG] 闹钟已创建: delay=${r}min, period=${r}min`));
+  }
+  async function h() {
+    if (!(await d()))
+      return (
+        console.log("[BG] ensureDetectionRuntime: 检测未启用，清除闹钟"),
+        void (await new Promise((e) => {
+          chrome.alarms.clear(t, () => {
+            (chrome.runtime.lastError, e());
+          });
+        }))
+      );
+    const e = await m();
+    (console.log(
+      `[BG] ensureDetectionRuntime: 检测已启用，间隔=${e.checkInterval}分钟`,
+    ),
+      await g(e.checkInterval),
+      u().catch((e) => {
+        console.warn(
+          "[BG] ensureDetectionRuntime: 预热模型失败（不影响闹钟）:",
+          e,
+        );
+      }));
+  }
+  (chrome.runtime.onInstalled.addListener(async () => {
+    const t = await chrome.storage.local.get(["settings", r]),
+      o = { ...e, ...(t.settings || {}) };
+    (await chrome.storage.local.set({ settings: o }),
+      "boolean" != typeof t[r] && (await chrome.storage.local.set({ [r]: !1 })),
+      await h(),
+      console.log("姿势企鹅已安装并初始化"));
+  }),
+    chrome.runtime.onStartup.addListener(() => {
+      h().catch((e) => {
+        console.error("[BG] 恢复检测状态失败:", e);
+      });
+    }),
+    console.log("[BG] Service Worker 启动"),
+    chrome.alarms.onAlarm.addListener(async (e) => {
+      if (e.name !== t) return;
+      if (!(await d()))
+        return void console.log("[BG] ⏰ 闹钟触发但检测未启用，跳过");
+      const r = await m(),
+        o = new Date();
+      if (
+        !(function (e, r) {
+          const t = 60 * r.getHours() + r.getMinutes(),
+            [o, n] = e.dailyStartTime.split(":").map(Number),
+            [c, s] = e.dailyEndTime.split(":").map(Number);
+          return t >= 60 * o + n && t <= 60 * c + s;
+        })(r, o)
+      )
+        return void console.log(
+          `[BG] ⏰ 当前时间 ${o.getHours()}:${String(o.getMinutes()).padStart(2, "0")} 不在检测窗口 ${r.dailyStartTime}~${r.dailyEndTime} 内，跳过`,
+        );
+      console.log("[BG] ⏰ 定时检测触发，开始执行姿势检测...");
+      const n = await (async function () {
+        if (
+          (console.log(
+            "[BG] runOnePostureCheck: 创建/确认 offscreen document...",
+          ),
+          !(await l()))
+        )
+          return (
+            console.error("[BG] runOnePostureCheck: offscreen 创建失败"),
+            { success: !1, error: "offscreen_create_failed" }
+          );
+        if (
+          (console.log("[BG] runOnePostureCheck: 等待 offscreen 就绪..."),
+          !(await a()))
+        )
+          return (
+            console.error("[BG] runOnePostureCheck: offscreen 未在超时内就绪"),
+            { success: !1, error: "offscreen_not_ready" }
+          );
+        console.log("[BG] runOnePostureCheck: 发送 ANALYZE_POSTURE 消息...");
+        const e = await s({ type: "ANALYZE_POSTURE" });
+        return e
+          ? (console.log(
+              "[BG] runOnePostureCheck: 收到响应",
+              e.success ? "✅" : `❌ ${e.error}`,
+            ),
+            e)
+          : (console.error("[BG] runOnePostureCheck: offscreen 未响应"),
+            { success: !1, error: "offscreen 未响应" });
+      })();
+      if (!n.success || !n.result) {
+        const e = n.error || "unknown";
+        return (
+          console.warn("[BG] 自动姿势检测失败:", e),
+          void (
+            (e.includes("camera") ||
+              e.includes("offscreen") ||
+              e.includes("not_ready")) &&
+            chrome.notifications.create(`postureReminder-${Date.now()}`, {
+              type: "basic",
+              iconUrl: "icons/icon128.png",
+              title: "🐧 姿势企鹅提醒",
+              message: `自动检测遇到问题：${e}。将在下次定时重试。`,
+              priority: 1,
+            })
+          )
+        );
+      }
+      var c;
+      (c = n.result).score <= 0 ||
+      c.issues.includes("noPoseDetected") ||
+      c.issues.includes("lowConfidence")
+        ? console.log(
+            "[BG] 检测结果无效（无人/低置信度），跳过",
+            n.result.issues,
+          )
+        : (console.log(
+            `[BG] ✅ 自动检测完成: 评分=${n.result.score}, 问题=${n.result.issues.join(",") || "无"}`,
+          ),
+          await (async function (e) {
+            try {
+              const r = `records_${(function (e = new Date()) {
+                  return `${e.getFullYear()}-${String(e.getMonth() + 1).padStart(2, "0")}-${String(e.getDate()).padStart(2, "0")}`;
+                })()}`,
+                t = {
+                  id: crypto.randomUUID(),
+                  timestamp: Date.now(),
+                  score: e.score,
+                  issues: e.issues,
+                  headForward: e.headForward,
+                  hunchback: e.hunchback,
+                  misaligned: e.misaligned,
+                },
+                o = (await chrome.storage.local.get(r))[r] || [];
+              (await chrome.storage.local.set({ [r]: [...o, t] }),
+                console.log(
+                  `[BG] 检测记录已保存: 评分=${e.score}, 今日检测次数=${o.length + 1}`,
+                ));
+            } catch (e) {
+              console.error("[BG] 保存检测记录失败:", e);
+            }
+          })(n.result),
+          n.result.score < 70 &&
+            (function (e, r) {
+              const t =
+                r.length > 0
+                  ? `问题：${r.join("、")}`
+                  : "检测到姿势异常，请调整坐姿";
+              chrome.notifications.create(`postureReminder-${Date.now()}`, {
+                type: "basic",
+                iconUrl: "icons/icon128.png",
+                title: "🐧 姿势企鹅提醒",
+                message: `当前姿势评分 ${e} 分。${t}`,
+                priority: 2,
+              });
+            })(n.result.score, n.result.issues));
+    }),
+    chrome.runtime.onMessage.addListener((e, r, o) =>
+      "OFFSCREEN_READY" === e.type
+        ? ((n = !0), console.log("[BG] Offscreen document ready"), !1)
+        : "CAMERA_READY" === e.type
+          ? ((c = Boolean(e.success)),
+            console.log("[BG] Camera ready:", e.success, e.error || ""),
+            !1)
+          : "START_DETECTION" === e.type
+            ? ((async () => {
+                await f(!0);
+                const e = await m();
+                (console.log(
+                  `[BG] START_DETECTION: 启用检测，间隔=${e.checkInterval}分钟`,
+                ),
+                  await g(e.checkInterval),
+                  u().catch((e) => {
+                    console.warn(
+                      "[BG] START_DETECTION: 预热模型失败（不影响检测）:",
+                      e,
+                    );
+                  }),
+                  o({ success: !0, cameraReady: !1 }));
+              })().catch((e) => {
+                (console.error("[BG] START_DETECTION failed:", e),
+                  o({ success: !1, error: String(e) }));
+              }),
+              !0)
+            : "STOP_DETECTION" === e.type
+              ? ((async () => {
+                  (await f(!1),
+                    chrome.alarms.clear(t),
+                    await (async function () {
+                      (await s({ type: "STOP_CAMERA" }), (c = !1));
+                    })(),
+                    await (async function () {
+                      if (!(await i())) return ((n = !1), void (c = !1));
+                      try {
+                        (await chrome.offscreen.closeDocument(),
+                          (n = !1),
+                          (c = !1),
+                          console.log("[BG] Offscreen document closed"));
+                      } catch (e) {
+                        console.error(
+                          "[BG] Failed to close offscreen document:",
+                          e,
+                        );
+                      }
+                    })(),
+                    o({ success: !0 }));
+                })().catch((e) => {
+                  (console.error("[BG] STOP_DETECTION failed:", e),
+                    o({ success: !1, error: String(e) }));
+                }),
+                !0)
+              : "GET_DETECTION_STATUS" === e.type
+                ? ((async () => {
+                    o({ enabled: await d(), cameraReady: c });
+                  })().catch(() => {
+                    o({ enabled: !1, cameraReady: !1 });
+                  }),
+                  !0)
+                : "UPDATE_INTERVAL" === e.type
+                  ? ((async () => {
+                      ((await d()) &&
+                        "number" == typeof e.interval &&
+                        g(e.interval),
+                        o({ success: !0 }));
+                    })().catch((e) => {
+                      (console.error("[BG] UPDATE_INTERVAL failed:", e),
+                        o({ success: !1, error: String(e) }));
+                    }),
+                    !0)
+                  : "SHOW_NOTIFICATION" === e.type &&
+                    (chrome.notifications.create({
+                      type: "basic",
+                      iconUrl: "icons/icon128.png",
+                      title: "姿势企鹅提醒",
+                      message: e.message,
+                      priority: 2,
+                    }),
+                    !1),
+    ),
+    chrome.alarms.create(o, { periodInMinutes: 1440 }),
+    chrome.alarms.onAlarm.addListener(async (e) => {
+      if (e.name !== o) return;
+      const r = new Date();
+      r.setDate(r.getDate() - 90);
+      const t = await chrome.storage.local.get(null),
+        n = [];
+      for (const e of Object.keys(t))
+        if (e.startsWith("records_")) {
+          const t = e.replace("records_", "");
+          new Date(t) < r && n.push(e);
+        }
+      n.length > 0 &&
+        (await chrome.storage.local.remove(n),
+        console.log(`清理了 ${n.length} 天的旧数据`));
+    }));
+})();

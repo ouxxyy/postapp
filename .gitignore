@@ -1,0 +1,58 @@
+# Dependencies
+node_modules/
+
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Build output
+*.zip
+posture-penguin/dist/*.map
+posture-penguin/dist/*.LICENSE.txt
+posture-penguin/store-package/
+
+# Source maps
+*.map
+
+# Claude / AI tools
+.claude/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Misc
+Thumbs.db
+
+# Video files (too large for repo)
+posture-video/
+posture-penguin-video/
+posture-video.mp4
+*.mp4
+
+# Temporary scripts
+replace_qrcode.py
+send_feishu_video.py
+
+# Internal task docs
+OPE-453-*.md
+
+# Design assets build
+design-assets/node_modules/

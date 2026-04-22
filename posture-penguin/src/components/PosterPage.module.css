@@ -1,0 +1,122 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--color-bg);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-bg-alt);
+  flex-shrink: 0;
+}
+
+.backBtn {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 0;
+  border-radius: var(--radius-xs);
+  transition: all var(--transition-fast);
+  min-width: 48px;
+  white-space: nowrap;
+}
+
+.backBtn:hover {
+  background: var(--color-bg-alt);
+  color: var(--color-text);
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.spacer {
+  min-width: 48px;
+}
+
+.previewArea {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.canvas {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-card);
+  object-fit: contain;
+}
+
+.loading {
+  color: var(--color-text-muted);
+  font-size: 14px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.scoreBadge {
+  text-align: center;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  padding: 6px 12px;
+  background: var(--color-card);
+  margin: 0 12px;
+  border-radius: var(--radius-xs);
+  box-shadow: var(--shadow-card);
+  flex-shrink: 0;
+}
+
+.scoreBadge strong {
+  color: var(--color-primary-dark);
+  font-size: 14px;
+}
+
+.actions {
+  padding: 8px 12px;
+  flex-shrink: 0;
+}
+
+.downloadBtn {
+  width: 100%;
+  padding: 12px;
+  background: var(--color-primary);
+  color: white;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 15px;
+  font-weight: 700;
+  font-family: var(--font-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  box-shadow: var(--shadow-button);
+}
+
+.downloadBtn:hover:not(:disabled) {
+  background: var(--color-primary-dark);
+}
+
+.downloadBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.hint {
+  text-align: center;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  padding: 4px 12px 10px;
+  flex-shrink: 0;
+}

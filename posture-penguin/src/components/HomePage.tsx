@@ -3,7 +3,7 @@ import { useAppContext } from "../hooks/useAppContext";
 import styles from "./HomePage.module.css";
 import HistorySection from "./HistorySection";
 
-type PageType = "home" | "detection" | "settings" | "stats";
+type PageType = "home" | "detection" | "settings" | "stats" | "poster";
 
 interface HomePageProps {
   onNavigate: (page: PageType) => void;
@@ -158,6 +158,13 @@ const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
             <span>数据统计</span>
           </button>
         </div>
+        <button
+          className={styles.shareBtn}
+          onClick={() => onNavigate("poster")}
+        >
+          <span>🖼️</span>
+          <span>分享海报</span>
+        </button>
       </div>
 
       {/* Recent Detection History */}

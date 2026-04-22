@@ -186,6 +186,30 @@
   color: var(--color-text);
 }
 
+.shareBtn {
+  width: 100%;
+  margin-top: 12px;
+  padding: 12px;
+  border: 2px dashed var(--color-primary-light);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 138, 155, 0.06);
+  color: var(--color-primary-dark);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: var(--font-primary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all var(--transition-fast);
+}
+
+.shareBtn:hover {
+  background: rgba(255, 138, 155, 0.12);
+  border-color: var(--color-primary);
+}
+
 /* Tip Section */
 .tipSection {
   background: var(--color-card);

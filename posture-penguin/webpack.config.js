@@ -57,6 +57,8 @@ module.exports = {
         { from: "public/manifest.json", to: "manifest.json" },
         { from: "public/icons", to: "icons" },
         { from: "public/models", to: "models" },
+        { from: "public/poster.png", to: "poster.png" },
+        { from: "public/qrcode.jpg", to: "qrcode.jpg" },
       ],
     }),
   ],
