@@ -5,7 +5,7 @@
 ## 功能特性
 
 - **定时姿势检测** - 自动定时拍照检测你的坐姿
-- **实时姿势识别** - 使用 MediaPipe BlazePose 本地 AI 算法
+- **实时姿势识别** - 使用 TensorFlow.js MoveNet 本地 AI 算法
 - **温柔提醒** - 小企鹅动画 + 柔和音效，不打断工作
 - **数据统计** - 姿势评分趋势图、周月报
 - **隐私保护** - 所有图像处理均在本地完成，不上传服务器
@@ -16,7 +16,7 @@
 - **框架**: React 18 + TypeScript
 - **构建**: Webpack 5
 - **平台**: Chrome Extension Manifest V3
-- **AI 算法**: MediaPipe BlazePose
+- **AI 算法**: TensorFlow.js MoveNet（Lightning）
 - **图表**: Recharts
 - **存储**: Chrome Storage API
 
@@ -79,7 +79,7 @@ posture-penguin/
 
 ### 姿势检测算法
 
-使用 MediaPipe BlazePose 进行实时姿势识别，检测：
+使用 TensorFlow.js MoveNet（SINGLEPOSE_LIGHTNING）进行实时姿势识别，检测：
 
 - **头前倾** - 计算耳朵与肩膀的位置关系
 - **驼背** - 肩膀高度差分析
