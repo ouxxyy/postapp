@@ -1,10 +1,22 @@
-# Posture Penguin 🐧 姿势企鹅
+# Posture Penguin（姿势企鹅 / postapp）｜Chrome 坐姿提醒插件
 
 **一个在浏览器里帮你盯坐姿的 Chrome 插件**：定时用摄像头检测你的坐姿，发现驼背、头前倾就派一只小企鹅来温柔提醒——所有画面都在你电脑本地处理，一张也不会上传。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-orange.svg)](LICENSE)
 
 ---
+
+[使用示例](#quick-example) · [开始使用](#quick-start) · [English](#english-overview)
+
+<a id="quick-example"></a>
+
+## 一次使用示例
+
+**使用示例：** 从源码构建并加载扩展，允许摄像头权限，设置检测间隔，再在日常电脑工作中接收坐姿提醒。
+
+**输出：** 插件在本机做姿态检测，用企鹅动画与音效提醒，并在浏览器里保存姿势记录。下方预览图是 UI 设计稿，不作为实际检测效果或健康改善的证据。
+
+[查看源码安装步骤](#quick-start)。仓库名 `postapp`、英文产品名 Posture Penguin 和中文名“姿势企鹅”指同一个项目。
 
 ## 🖼 界面预览
 
@@ -38,6 +50,8 @@
 | 🔒 **隐私保护** | 不上传任何图像或数据，记录只存在本地 Chrome Storage，90 天后自动清理 |
 
 ---
+
+<a id="quick-start"></a>
 
 ## 🛠 安装
 
@@ -110,6 +124,34 @@ postapp/
 遇到问题提 [Issue](https://github.com/ouxxyy/postapp/issues) 时，附上 Chrome 版本、操作系统和报错截图就够了；**请不要上传含真人面部的截图**，普通界面截图即可。
 
 ---
+
+## 常见问题
+
+### 可以直接在 Chrome Web Store 安装吗？
+
+目前未上架。需要按源码安装步骤构建，再加载已解压的扩展程序。
+
+### 摄像头画面会上传吗？
+
+图像通过 TensorFlow.js MoveNet 在本机处理；姿势记录保存在本地 Chrome Storage，按项目规则清理。
+
+### 它能治疗颈椎问题或保证矫正坐姿吗？
+
+不能作这样的承诺。它提供坐姿提醒和行为记录，不提供医疗诊断或治疗。
+
+<a id="english-overview"></a>
+
+## English overview
+
+Posture Penguin (姿势企鹅; repository name: postapp) is a Chrome posture reminder extension using on-device pose detection and local posture records. Camera frames are processed locally with TensorFlow.js MoveNet.
+
+See [source installation](#quick-start): it is not currently listed in the Chrome Web Store, so build it and load the unpacked extension. Camera permission is required. The preview images are UI mockups, not validation of detection accuracy or medical benefit.
+
+## 相关项目
+
+[欧八同学的 AI Skills 与跳槽涨薪工具合集](https://github.com/ouxxyy/ouba-classmate)，还可以接着使用：
+
+- [结合 ActivityWatch 回顾专注与任务切换](https://github.com/ouxxyy/Attention)
 
 ## 👤 作者
 
