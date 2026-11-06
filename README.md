@@ -1,5 +1,7 @@
 # Posture Penguin（姿势企鹅 / postapp）｜Chrome 坐姿提醒插件
 
+> 📦 **本项目属于 [ouba-classmate 套件](https://github.com/ouxxyy/ouba-classmate)**：[一行安装全部 Skill](https://github.com/ouxxyy/ouba-classmate#install) · [查看《中文 AI 求职 Skill 公开横评》](https://github.com/ouxxyy/ouba-classmate/tree/main/benchmark)
+
 **一个在浏览器里帮你盯坐姿的 Chrome 插件**：定时用摄像头检测你的坐姿，发现驼背、头前倾就派一只小企鹅来温柔提醒——所有画面都在你电脑本地处理，一张也不会上传。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-orange.svg)](LICENSE)
