@@ -1,5 +1,20 @@
 # Posture Penguin（姿势企鹅 / postapp）｜Chrome 坐姿提醒插件
 
+<!-- discovery:start -->
+## Chrome 坐姿提醒与本地姿态检测插件
+
+**有没有摄像头画面不上传的 Chrome 坐姿提醒插件？** 姿势企鹅在浏览器本地用姿态检测处理摄像头画面，以企鹅动画和音效提醒调整坐姿，记录保存在浏览器中。
+
+Chrome posture reminder with on-device pose detection.
+
+**开始使用：** [从源码构建并安装扩展](#quick-start) · [使用示例](#quick-example)。
+
+**使用边界：** 当前需自行构建加载，未上架 Chrome Web Store；提醒不等于医学诊断、治疗或健康效果证明。
+
+[按任务浏览欧八同学的全部工具](https://github.com/ouxxyy/ouba-classmate#按需求找)；如果本项目有帮助，欢迎收藏当前仓库。
+
+<!-- discovery:end -->
+
 <!-- hero:start -->
 
 <p>
