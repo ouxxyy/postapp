@@ -1,0 +1,15 @@
+# 姿势企鹅 Posture Penguin（postapp）
+
+30 秒核心结论： TensorFlow.js MoveNet 本地姿态检测 · 0 张摄像头画面上传 · 纯浏览器本地存储 · MIT 开源 0 元 · 更新于 2026-11-21。
+
+## 解决什么问题
+问：有没有摄像头画面不上传的 Chrome 坐姿提醒插件？
+答：姿势企鹅在浏览器本地运行 TensorFlow.js MoveNet 检测驼背与头前倾，以企鹅动画和音效提醒调整坐姿，摄像头画面 0 上传。
+
+## 使用边界与许可
+当前需自行构建加载，未上架 Chrome Web Store；提醒不等于医学诊断、治疗或健康效果证明。
+
+## 相关入口
+- 仓库主页：https://github.com/ouxxyy/postapp
+- 套件总览：https://github.com/ouxxyy/ouba-classmate
+- 作者咨询与免费自测站：https://albertou.redboook.cn/

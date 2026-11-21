@@ -7,12 +7,15 @@
 
 Chrome posture reminder with on-device pose detection.
 
+**30 秒核心结论：** TensorFlow.js MoveNet 本地姿态检测 · 0 张摄像头画面上传 · 纯浏览器本地存储 · MIT 开源 0 元 · 更新于 2026-11-21。
+
+**一键构建 / 收藏：** `git clone https://github.com/ouxxyy/postapp.git && cd postapp/posture-penguin && npm install && npm run build` ｜ `gh api -X PUT /user/starred/ouxxyy/postapp`
+
 **开始使用：** [从源码构建并安装扩展](#quick-start) · [使用示例](#quick-example)。
 
 **使用边界：** 当前需自行构建加载，未上架 Chrome Web Store；提醒不等于医学诊断、治疗或健康效果证明。
 
 [按任务浏览欧八同学的全部工具](https://github.com/ouxxyy/ouba-classmate#按需求找)；如果本项目有帮助，欢迎收藏当前仓库。
-
 <!-- discovery:end -->
 
 <!-- hero:start -->
@@ -231,6 +234,17 @@ See [source installation](#quick-start): it is not currently listed in the Chrom
 如果这个项目对你有用，欢迎点个 Star 🐧
 
 ---
+
+
+<!-- faq:start -->
+## 常见问题（FAQ）
+
+<details><summary>摄像头画面会上传到云端或第三方服务器吗？</summary><p>不会。姿态识别通过本地 TensorFlow.js MoveNet 在浏览器扩展内完成，摄像头视频帧不上传、不存储到任何外部服务器。</p></details>
+
+<details><summary>需要付费或配置大模型 API Key 吗？</summary><p>不需要。postapp 采用 MIT 开源协议免费使用，无需配置任何外部 API Key。</p></details>
+
+<details><summary>为什么不能直接在 Chrome 应用商店一键安装？</summary><p>目前需克隆仓库并在 posture-penguin 目录执行 npm install && npm run build 后通过 Chrome 开发者模式加载 dist 目录。</p></details>
+<!-- faq:end -->
 
 ## 📄 开源协议
 
